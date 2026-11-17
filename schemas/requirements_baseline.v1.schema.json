@@ -76,7 +76,7 @@
                 "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
                 "expected_exit_code": { "type": "integer" },
                 "pinned_files": {
-                  "description": "Workspace files that are part of the acceptance criterion (scripts, configs, fixtures). Their bytes are frozen here and checked before and after the run.",
+                  "description": "Criterion files (scripts, modules, configs, fixtures). Every workspace program the command executes must be listed. Their verified bytes are written into a private snapshot the command runs in; they are checked before and after the run.",
                   "type": "array",
                   "items": {
                     "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
@@ -84,7 +84,7 @@
                   }
                 },
                 "artifacts": {
-                  "description": "Delivered workspace paths the command examines. They are what is being tested, so they are not pinned.",
+                  "description": "Delivered data paths under test. They only waive pinning for data arguments of a {python} program; they never waive the program itself or arguments of any other program.",
                   "type": "array", "items": { "$ref": "#/$defs/relpath" }, "uniqueItems": true
                 }
               }

@@ -29,14 +29,12 @@ from __future__ import annotations
 import copy
 import hmac
 import json
-import os
-import subprocess
-import sys
 from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
 from .canonical import canonical_json, hash_obj, parse_time, resolve_in_workspace, sha256_file
+from .command import run_command
 from .evidence import (
     PURPOSE_BASELINE_ANCHOR,
     TrustStore,
@@ -50,7 +48,7 @@ from .evidence import (
 from .safeschema import check_document, pin_issue
 from .schemas import schema_errors
 
-ACCEPTANCE_VERSION = "phi-core-acceptance/1.0.1"
+ACCEPTANCE_VERSION = "phi-core-acceptance/1.0.2"
 DEFAULT_EVIDENCE_MAX_AGE = 86400
 _DELIVERY_KNOWN_FIELDS = {"delivery_version", "baseline_id", "baseline_revision", "produced_by",
                           "claimed_status", "trace", "evidence"}
@@ -114,10 +112,6 @@ def new_revision(old: Mapping[str, Any], *, requirements: list, summary: str, fr
     return out
 
 
-def _tail(text: str, n: int = 2000) -> str:
-    return text[-n:] if text else ""
-
-
 class _Ctx:
     def __init__(self, workspace: Path, now, trust_store, verifiers, command_env, delivery_evidence,
                  baseline_id=None, baseline_revision=None):
@@ -151,95 +145,12 @@ def _check_file(spec, ctx):
     return AStatus.PASS, ["FILE_VERIFIED"], {"sha256": actual}
 
 
-def _pin_problem(spec, ctx, modified_code):
-    """First pinned criterion file that is missing or differs from its frozen hash."""
-    for pin in spec.get("pinned_files", []):
-        target = resolve_in_workspace(ctx.workspace, pin["path"])
-        if target is None or not target.is_file():
-            return "COMMAND_PINNED_FILE_MISSING", pin["path"]
-        if sha256_file(target) != pin["sha256"]:
-            return modified_code, pin["path"]
-    return None
-
-
-def _workspace_path(root: Path, token: str) -> Path | None:
-    if not token or "\x00" in token:
-        return None
-    if Path(token).is_absolute():
-        p = Path(token).resolve()
-        try:
-            p.relative_to(root)
-        except ValueError:
-            return None
-        return p
-    return resolve_in_workspace(root, token)
-
-
-def _unpinned_workspace_files(argv, spec, ws: Path) -> list[str]:
-    """Workspace files that argv names directly (a path token, ``-m module``, or
-    ``--opt=path``) but that are neither pinned nor declared artifacts.
-
-    This is a guard against the common "run a script from the delivery" case,
-    not an enumeration of what the program reads: imports, config discovery,
-    fixtures and data opened by name inside the program are invisible here and
-    must be listed in ``pinned_files`` by the baseline author."""
-    root = ws.resolve()
-    pinned = {p for p in (resolve_in_workspace(root, x["path"]) for x in spec.get("pinned_files", [])) if p}
-    artifacts = [p for p in (resolve_in_workspace(root, a) for a in spec.get("artifacts", [])) if p]
-
-    def is_artifact(p: Path) -> bool:
-        return any(p == a or a in p.parents for a in artifacts)
-
-    found: set[str] = set()
-    prev = None
-    for tok in argv:
-        cands = []
-        if prev == "-m":
-            mod = tok.replace(".", "/")
-            cands += [f"{mod}.py", f"{mod}/__main__.py", f"{mod}/__init__.py"]
-        cands.append(tok)
-        if tok.startswith("-") and "=" in tok:
-            cands.append(tok.split("=", 1)[1])
-        for cand in cands:
-            p = _workspace_path(root, cand)
-            if p is None or not p.exists():
-                continue
-            files = [p] if p.is_file() else sorted(f.resolve() for f in p.rglob("*") if f.is_file())
-            for f in files:
-                if f not in pinned and not is_artifact(f):
-                    found.add(str(f.relative_to(root)))
-        prev = tok
-    return sorted(found)
-
-
 def _check_command(spec, ctx):
-    """Supported, auditable command protocol: the argv text is frozen by the
-    baseline hash; every workspace file that is part of the criterion is frozen
-    in ``pinned_files`` and re-hashed before and after the run; argv tokens that
-    name unpinned, undeclared workspace files make the result INCONCLUSIVE."""
-    argv = [sys.executable if a == "{python}" else a for a in spec["argv"]]
-    problem = _pin_problem(spec, ctx, "COMMAND_PINNED_FILE_MODIFIED")
-    if problem is not None:
-        return AStatus.FAIL, [problem[0]], {"path": problem[1]}
-    unpinned = _unpinned_workspace_files(argv, spec, ctx.workspace)
-    if unpinned:
-        return AStatus.INCONCLUSIVE, ["COMMAND_WORKSPACE_FILE_NOT_PINNED"], {"unpinned": unpinned[:50]}
-    env = ctx.command_env if ctx.command_env is not None else {"PATH": os.environ.get("PATH", "")}
-    try:
-        proc = subprocess.run(argv, cwd=ctx.workspace, capture_output=True, text=True, shell=False,
-                              timeout=spec.get("timeout_seconds", 120), env=env)
-    except subprocess.TimeoutExpired:
-        return AStatus.INCONCLUSIVE, ["COMMAND_TIMEOUT"], {}
-    except OSError as exc:
-        return AStatus.INCONCLUSIVE, ["COMMAND_NOT_RUNNABLE"], {"error": type(exc).__name__}
-    detail = {"exit_code": proc.returncode, "stdout_tail": _tail(proc.stdout), "stderr_tail": _tail(proc.stderr),
-              "pinned_files_verified": [p["path"] for p in spec.get("pinned_files", [])]}
-    problem = _pin_problem(spec, ctx, "COMMAND_PINNED_FILE_MODIFIED_DURING_RUN")
-    if problem is not None:
-        return AStatus.FAIL, [problem[0]], {**detail, "path": problem[1]}
-    if proc.returncode == spec.get("expected_exit_code", 0):
-        return AStatus.PASS, ["COMMAND_EXIT_CODE_AS_EXPECTED"], detail
-    return AStatus.FAIL, ["COMMAND_EXIT_CODE_UNEXPECTED"], detail
+    """Frozen-criterion command protocol (see :mod:`phi_core.command`): the argv
+    text is frozen by the baseline hash, workspace programs and criteria must be
+    pinned, and the command runs against a snapshot holding the verified bytes."""
+    status, codes, detail = run_command(spec, ctx.workspace, ctx.command_env)
+    return AStatus(status), codes, detail
 
 
 def _check_json_schema(spec, ctx):
