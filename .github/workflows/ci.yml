@@ -14,7 +14,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12"]
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -25,13 +25,51 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install ".[test]"
       - name: CLI smoke
+        shell: bash
         run: |
+          set -u
+          expect() { want=$1; shift; set +e; "$@"; got=$?; set -e; echo "exit=$got (expected $want): $*"; test "$got" -eq "$want"; }
+          set -e
+          phi --version
           phi --help
           phi validate examples/sample_task.json
-          set +e
-          phi evaluate examples/sample_task.json
-          code=$?
+          phi validate examples/v1/contract.json
+          for cp in PLAN DISPATCH STEP COMMIT; do
+            expect 0 phi evaluate --request examples/v1/request.json --checkpoint $cp --trust examples/trust.demo.json --audit ci-audit.jsonl > /dev/null
+          done
+          expect 20 phi evaluate --request examples/v1/request.json --checkpoint COMMIT > /dev/null
+          expect 0 phi audit verify ci-audit.jsonl > /dev/null
+          expect 0 phi audit replay ci-audit.jsonl > /dev/null
+          expect 20 phi gate-exec --request examples/v1/request.json --checkpoint COMMIT -- touch should-not-exist
+          test ! -e should-not-exist
+          expect 0 phi gate-exec --request examples/v1/request.json --trust examples/trust.demo.json -- touch did-run
+          test -e did-run
+          expect 0 phi accept --baseline examples/acceptance/baseline.json --anchor examples/acceptance/anchor.json \
+            --delivery examples/acceptance/delivery.json --workspace examples/v1/workspace \
+            --now 2026-11-17T00:00:00Z --trust examples/trust.demo.json --require-signed-anchor > /dev/null
+      - name: Example harness (real gated side effects)
+        shell: bash
+        run: |
           set -e
-          test "$code" -eq 3
+          run() { set +e; python examples/minimal_harness/harness.py --workspace "$RUNNER_TEMP/h-$1" --scenario "$1" > "$RUNNER_TEMP/h-$1.json"; got=$?; set -e; echo "$1 exit=$got expected=$2"; test "$got" -eq "$2"; }
+          run ok 0
+          run tampered_input 10
+          run dependency_pending 20
+          run bad_output 10
+          run ownership_conflict 10
+          run contract_edit_midrun 20
+          test -e "$RUNNER_TEMP/h-ok/output/count.json"
+          test ! -e "$RUNNER_TEMP/h-tampered_input/output"
+          test ! -e "$RUNNER_TEMP/h-dependency_pending/output"
       - name: Pytest
-        run: python -m pytest -v
+        run: python -m pytest -v -rA --junitxml=junit-${{ matrix.python-version }}.xml
+      - name: Benchmark (quick)
+        run: python benchmarks/bench_phi.py --quick --repeats 3 --output bench-${{ matrix.python-version }}.json
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: results-${{ matrix.python-version }}
+          path: |
+            junit-${{ matrix.python-version }}.xml
+            bench-${{ matrix.python-version }}.json

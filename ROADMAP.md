@@ -1,34 +1,31 @@
 # phi-core 路线图
 
-> 阶段划分为计划，不构成承诺；每个阶段需单独授权后才开始。
+> 每个后续阶段需单独授权后才开始。
 
-## 阶段 0：工程脚手架（本阶段）
+## 阶段 0：工程脚手架 —— 已完成
 
-- [x] Python 包结构、`pyproject.toml`、`phi` 命令行入口
-- [x] 任务契约 / 证据数据模型（`0.1-draft`，未冻结）
-- [x] 任务契约 JSON Schema 与结构验证
-- [x] `evaluator.evaluate` 接口占位（抛 `NotImplementedError`）
-- [x] `phi evaluate` 返回 `NOT_IMPLEMENTED`（非零退出）
-- [x] pytest 单元测试、GitHub Actions CI
-- [ ] Φ 核心逻辑 —— **本阶段明确不做**
+包结构、草案契约 0.1、CLI、pytest、CI。（Φ 当时刻意未实现。）
 
-## 阶段 1：规格确定（未开始）
+## 阶段 1：Φ Core v1.0 完整实现 —— 本阶段（PR #1）
 
-- 逐项回答 [SPECIFICATION.md](SPECIFICATION.md) 第 4 节的待确定问题
-- 冻结契约与证据协议的首个正式版本；补充证据 JSON Schema
+- [x] 正式 Φ(T,S,E) 三值引擎与计划级检查
+- [x] Task Contract v1.0、State v1.0、Evidence v1.0 Schema
+- [x] Predicate Registry、Evidence Verifier、TrustStore
+- [x] PLAN/DISPATCH/STEP/COMMIT 门禁、HarnessAdapter、最小示例 Harness、`phi gate-exec`
+- [x] JSONL 审计链：重放、篡改检测、版本比较、证据追踪、状态重建
+- [x] 独立 Acceptance：冻结基线 + 独立锚、设计 hash、追踪矩阵、DDR
+- [x] A–T 对抗测试、属性/模糊、集成、性能测试；CI
+- [ ] 独立第三方测试 —— 由用户安排，不在本阶段宣布
 
-## 阶段 2：Φ 核心实现（未开始）
+## 可能的后续阶段（未开始、未承诺）
 
-- 实现三值判断，覆盖 TRUE / FALSE / UNKNOWN 的判定条件
-- 约束分类、证据验证、证据冲突处理（按阶段 1 决定的规则）
-- 针对三值语义的系统测试
+- 非对称签名验证器（Ed25519 等），使证据签发者与验证者不必共享密钥
+- 外部审计锚 / 可信时间的可插拔接口（仍保持核心本地运行）
+- 更多内置确定性谓词（如 API 契约 / OpenAPI 兼容性）
+- OS 级隔离参考集成（容器/沙箱中只允许经 `phi gate-exec` 启动的命令）
+- 是否以及如何与 feasibility-scheduler 对接另行决定；phi-core 保持独立
 
-## 阶段 3：集成接口（未开始）
-
-- 面向外部调度器 / Harness 的稳定调用接口与适配层（Adapter）
-- 是否以及如何与 feasibility-scheduler 对接另行决定；phi-core 保持独立，不以其为运行依赖
-
-## 始终独立的事项
+## 始终独立
 
 - 最终交付验收（Acceptance）是独立门禁，不并入 Φ
 - 许可证待定，需仓库所有者决定

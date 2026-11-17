@@ -2,82 +2,102 @@
 
 Independent reusable three-valued feasibility operator.
 
-> **当前状态：工程脚手架阶段（bootstrap）。Φ 核心逻辑尚未实现。**
-
-## 项目定位
-
-`phi-core` 的目标是提供一个独立、可复用的三值可行性算子：
+**中文优先。** phi-core 是一个可本地运行、确定性的三值可行性算子库：
 
 ```
-Φ(T, E) → {TRUE, FALSE, UNKNOWN}
+Φ(T, S, E) → TRUE | FALSE | UNKNOWN
 ```
 
-- `T`：任务契约（task contract）
-- `E`：证据集合（evidence）
-- `TRUE`：满足必要执行条件
-- `FALSE`：存在已验证的硬约束违反
-- `UNKNOWN`：证据不足，暂缓执行
+- `T`：任务 / 执行计划契约（Task Contract v1.0）
+- `S`：最新执行与调度状态（含显式时间 `now`）
+- `E`：可验证证据（由独立 Evidence Verifier 判定可信与否）
 
-上述语义是目标定义，**本阶段没有任何代码实现它**。
+它是原始 `Φ(p,σ) = ∏ I[C_i(p,σ)]` 的三值扩展，不使用加权、概率或模型判断：
 
-### 两道独立门禁
+1. 存在以有效证据/状态确定的**必要硬约束违反** → `FALSE`
+2. 否则存在**未解决的必要项**（证据缺失、过期、冲突、不匹配、无法验证、谓词不可执行、未声明约束范围完整……）→ `UNKNOWN`
+3. 否则**全部必要硬约束确定性满足**（空集合仅在显式声明范围完整时）→ `TRUE`
 
-Φ 可行性判断与最终交付验收（Acceptance）是**不同的门禁**：
+**只有 TRUE 放行。** FALSE 阻止，UNKNOWN 暂停并要求补证。软约束单独报告，永不参与裁决。
 
-- `Φ(T, E) = TRUE` **不能**推出 `Acceptance(T) = PASS`；
-- 两者不得合并为一个判断；
-- 本仓库不提供、也不声称提供通用 Harness 控制能力。
+## 两道独立门禁
 
-### 契约"格式有效"的含义
+| 门禁 | 模块 | 结果 | 作用 |
+| --- | --- | --- | --- |
+| Φ 可行性 | `phi_core.evaluator` / `gate` | TRUE / FALSE / UNKNOWN | 执行前/中/提交时是否满足必要执行条件 |
+| 最终验收 | `phi_core.acceptance` | PASS / FAIL / INCONCLUSIVE | 交付是否满足**冻结的原始需求与设计** |
 
-`phi validate` 通过只说明契约文档**结构合法**（符合 JSON Schema），
-**不代表**任务可行，也**不代表**最终验收通过。
+`Φ(T,S,E) = TRUE` **不能**推出 `Acceptance(T) = PASS`。两者分别运行、分别记录；验收模块不导入、不读取 Φ 的结果（有测试强制）。
 
 ## 安装
 
-要求 Python ≥ 3.11。
+要求 Python ≥ 3.11。唯一运行依赖：`jsonschema`。无云端服务、无 LLM、无 FBS 依赖。
 
 ```bash
 git clone https://github.com/zionlinne/phi-core.git
 cd phi-core
-python -m venv .venv
-source .venv/bin/activate
+python -m venv .venv && source .venv/bin/activate
 python -m pip install --upgrade pip
-python -m pip install ".[test]"      # 或开发模式: pip install -e ".[test]"
-```
-
-运行依赖仅有 `jsonschema`。本项目不依赖 feasibility-scheduler（FBS）。
-
-## 使用
-
-```bash
-phi --help
-phi validate examples/sample_task.json      # 退出码 0 = 结构合法
-phi evaluate examples/sample_task.json      # 输出 NOT_IMPLEMENTED，退出码 3
+python -m pip install ".[test]"          # 开发模式: pip install -e ".[test]"
 python -m pytest -v
 ```
 
-退出码：`0` 结构合法；`1` 结构不合法；`2` 用法错误 / 文件不可读 / JSON 损坏；`3` NOT_IMPLEMENTED。
+## 快速开始
 
-Python 调用：
+```bash
+# 结构验证（只说明格式合法，不是可行性或验收结论）
+phi validate examples/v1/contract.json
 
-```python
-from phi_core import TaskContract, EvidenceSet, validate_contract, evaluate
+# Φ 裁决：JSON 输入 → JSON 输出；退出码 0=TRUE 10=FALSE 20=UNKNOWN
+phi evaluate --request examples/v1/request.json --checkpoint DISPATCH --trust examples/trust.demo.json
+phi evaluate --contract T.json --state S.json --evidence E.json --checkpoint COMMIT --workspace ws/ --audit audit.jsonl
 
-result = validate_contract(data)          # ValidationResult(valid, errors)，仅结构检查
-contract = TaskContract.from_dict(data)   # 不合法时抛 ContractFormatError
-evaluate(contract, EvidenceSet())         # 总是抛 NotImplementedError
+# 外部命令门禁：只有 TRUE 才执行命令
+phi gate-exec --request examples/v1/request.json --trust examples/trust.demo.json -- make build
+
+# 审计：链校验 / 历史重放 / 证据追踪 / 状态重建
+phi audit verify audit.jsonl ; phi audit replay audit.jsonl
+
+# 独立验收：退出码 0=PASS 30=FAIL 40=INCONCLUSIVE
+phi accept --baseline examples/acceptance/baseline.json --anchor examples/acceptance/anchor.json \
+  --delivery examples/acceptance/delivery.json --workspace examples/v1/workspace \
+  --now 2026-11-17T00:00:00Z --trust examples/trust.demo.json --require-signed-anchor
+
+# 真实门禁的最小示例 Harness（场景: ok / tampered_input / dependency_pending / bad_output / ownership_conflict / contract_edit_midrun）
+python examples/minimal_harness/harness.py --workspace /tmp/phi-demo --scenario ok
 ```
 
-## 当前能力
+Python SDK：
+
+```python
+from phi_core import evaluate, PhiGate, GateSession, TrustStore
+
+result = evaluate(contract, state, evidence, checkpoint="DISPATCH", workspace="ws", trust_store=trust)
+result.verdict, result.release, result.reason_codes, result.constraint_results
+
+gate = PhiGate(workspace="ws", trust_store=trust, audit_log=AuditLog("audit.jsonl"))
+gate.guard("STEP", contract, latest_state_fn, latest_evidence_fn, action)   # 只有 TRUE 才调用 action
+```
+
+`examples/trust.demo.json` 中的密钥是**公开演示密钥**，不得用于真实部署。
+
+## 当前状态（严格区分）
 
 | 类别 | 内容 |
 | --- | --- |
-| 已实现 | 包结构与 `phi` 命令行入口；任务契约数据模型（`contracts.py`）；证据数据模型（`evidence.py`）；JSON Schema（`schemas/task_contract.schema.json`）；契约结构验证；pytest 单元测试；GitHub Actions CI |
-| 未实现 | Φ 三值判断；约束优先级；证据验证与证据冲突裁决；Acceptance 验收；Harness / Adapter；与 FBS 的任何集成 |
-| 未确定 | 契约与证据字段（当前为 `0.1-draft` 工程协议，**未冻结**）；`hard`/`soft` 的语义；证据充分性标准；见 [SPECIFICATION.md](SPECIFICATION.md) |
+| 已实现 | Task Contract v1.0 Schema 与约束编译；Predicate Registry（11 个内置确定性谓词 + 可注册）；Evidence Verifier（file_sha256 / json_schema / hmac_attestation + 可注册）；确定性引擎（单任务 + 计划级）；PLAN/DISPATCH/STEP/COMMIT 门禁、会话契约钉扎、决策令牌；通用 HarnessAdapter + GatedRunner + 最小示例 Harness；JSONL SHA-256 审计链（重放/版本比较/证据追踪/状态重建）；独立 Acceptance（基线锚、设计 hash、追踪矩阵、DDR）；CLI 与 JSON 协议 |
+| 已测试 / 已通过（本地） | 208 项 pytest，含 A–T 对抗场景、Hypothesis 属性/模糊测试、集成、绕过、重放、性能测试。远端 CI 结果见 PR |
+| 未验证 | 非 Linux 平台；Python 3.11/3.12/3.13 以外版本；大规模真实工作负载；多进程同时写同一审计文件（已加 `fcntl` 锁，但仅测试了多线程） |
+| 已知限制 | 见 [docs/SECURITY_BOUNDARIES.md](docs/SECURITY_BOUNDARIES.md)：进程内库无法阻止不经过它的代码；HMAC 只证明持有共享密钥；审计链无外部锚时可被整链重写；状态 `S` 由宿主提供并被信任；无法验证任意现实世界事实，只能验证已注册谓词/验证器所覆盖的内容 |
 
-后续阶段见 [ROADMAP.md](ROADMAP.md)。
+## 文档
+
+- [SPECIFICATION.md](SPECIFICATION.md)：Φ 正式定义、输入、裁决规则、证据规则、协议
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)：模块与数据流
+- [docs/API.md](docs/API.md)：Python SDK、CLI、JSON 协议、Adapter
+- [docs/SECURITY_BOUNDARIES.md](docs/SECURITY_BOUNDARIES.md)：可信边界与不能防御的内容
+- [docs/TRACEABILITY.md](docs/TRACEABILITY.md)：需求 → 代码 → 测试追踪矩阵（含未覆盖项）
+- [ROADMAP.md](ROADMAP.md)
 
 ## 许可证
 
