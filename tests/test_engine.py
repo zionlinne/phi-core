@@ -326,7 +326,7 @@ def test_result_serialises_with_full_references(trust):
     d = json.loads(json.dumps(r.to_dict()))
     assert d["constraint_results"][0]["evidence_refs"] == ["e"]
     assert d["evidence_results"][0]["status"] == "VERIFIED"
-    assert d["evaluator_version"] == "phi-core/1.0.0"
+    assert d["evaluator_version"] == "phi-core/1.0.1"
 
 
 # --------------------------------------------------------------------------- plan level

@@ -45,6 +45,7 @@ def base_state(**overrides):
 
 def attest(evidence_id, constraint_id, value, *, ts=EARLIER, source="ci-runner", key_id="k-ci",
            secret=SECRET, **kw):
+    kw.setdefault("binding", {"task_id": TASK})
     item = make_evidence(evidence_id, constraint_id, source=source, verifier_id="hmac_attestation",
                          observed_value=value, timestamp=ts, **kw)
     return sign_evidence(item, key_id, secret)

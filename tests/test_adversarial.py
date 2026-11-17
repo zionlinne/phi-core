@@ -42,7 +42,7 @@ def scenario(ws):
     contract = base_contract(
         dependencies=["dep-a"],
         inputs=[{"path": "in.txt", "sha256": sha(data)}],
-        outputs=[{"path": "out.json", "schema": "schema.json"}],
+        outputs=[{"path": "out.json", "schema": "schema.json", "schema_sha256": sha(json.dumps(SCHEMA).encode())}],
         constraints=[{"constraint_id": "tests", "kind": "hard",
                       "predicate": {"type": "attested_value", "params": {"expected": {"passed": True}}},
                       "checkpoints": ["COMMIT"], "evidence": {"max_age_seconds": 600}}],
@@ -304,14 +304,15 @@ def acceptance(ws, trust):
         "requirements": [
             {"requirement_id": "R1", "text": "out.json exists", "verification": {"method": "file", "path": "out.json"}},
             {"requirement_id": "R2", "text": "out.json schema", "design_ref": "D.1",
-             "verification": {"method": "json_schema", "path": "out.json", "schema_path": "schema.json"}},
+             "verification": {"method": "json_schema", "path": "out.json", "schema_path": "schema.json",
+                              "schema_sha256": sha(json.dumps(SCHEMA).encode())}},
             {"requirement_id": "R3", "text": "n is 1", "verification": {
                 "method": "command", "argv": ["{python}", "-c", "import json,sys; sys.exit(0 if json.load(open('out.json'))['n']==1 else 1)"]}},
         ],
         "change_log": [{"revision": 1, "summary": "initial"}],
     }
     authority = b"authority-secret-0123456789abcdef"
-    trust.add_key("k-auth", authority, ["acceptance-authority"])
+    trust.add_key("k-auth", authority, ["acceptance-authority"], purposes=["baseline-anchor"])
     anchor = {"anchor_version": "1.0", "baseline_id": "B", "revisions": [
         make_anchor_entry(baseline, anchored_by="authority", anchored_at="2026-11-01T00:00:00Z",
                           key_id="k-auth", secret=authority)]}

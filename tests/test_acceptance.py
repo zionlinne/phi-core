@@ -71,10 +71,12 @@ def test_evidence_requirement_without_ci_key_is_inconclusive():
 def test_evidence_value_mismatch_and_conflict(demo_trust):
     secret = bytes.fromhex(json.loads((ROOT / "examples" / "trust.demo.json").read_text())["keys"]["ci-demo-key"]["secret_hex"])
     d = load("delivery.json")
-    d["evidence"] = [attest("x", "acceptance:tests", {"passed": False}, key_id="ci-demo-key", secret=secret)]
+    d["evidence"] = [attest("x", "acceptance:tests", {"passed": False}, key_id="ci-demo-key", secret=secret,
+                           binding={"baseline_id": "report-req"})]
     rep = run(d=d, trust=demo_trust)
     assert rep["status"] == "FAIL"
-    d["evidence"].append(attest("y", "acceptance:tests", {"passed": True}, key_id="ci-demo-key", secret=secret))
+    d["evidence"].append(attest("y", "acceptance:tests", {"passed": True}, key_id="ci-demo-key", secret=secret,
+                              binding={"baseline_id": "report-req"}))
     rep = run(d=d, trust=demo_trust)
     r4 = next(r for r in rep["requirement_results"] if r["requirement_id"] == "R4")
     assert r4["status"] == "INCONCLUSIVE" and "EVIDENCE_CONFLICT" in r4["reason_codes"]
