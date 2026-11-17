@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zionlinne/phi-core/schemas/baseline_anchor.v1.schema.json",
+  "title": "phi-core Acceptance Baseline Anchor v1.0",
+  "description": "Independently held record of approved baseline revisions. Must be stored where the producer cannot write; optional HMAC signatures by an acceptance-authority key.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["anchor_version", "baseline_id", "revisions"],
+  "properties": {
+    "anchor_version": { "const": "1.0" },
+    "baseline_id": { "type": "string", "minLength": 1 },
+    "revisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision", "baseline_hash", "previous_revision_hash", "anchored_by", "anchored_at"],
+        "properties": {
+          "revision": { "type": "integer", "minimum": 1 },
+          "baseline_hash": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+          "previous_revision_hash": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] },
+          "anchored_by": { "type": "string", "minLength": 1 },
+          "anchored_at": { "type": "string" },
+          "key_id": { "type": "string" },
+          "signature": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+        }
+      }
+    }
+  }
+}

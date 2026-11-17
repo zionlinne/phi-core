@@ -1,0 +1,25 @@
+{
+  "state_version": "1.0",
+  "now": "2026-11-17T00:00:00Z",
+  "tasks": {
+    "fetch-data": {
+      "status": "completed"
+    },
+    "monthly-close": {
+      "status": "running"
+    },
+    "build-report": {
+      "status": "ready"
+    }
+  },
+  "resources": {
+    "cpu": 4
+  },
+  "capabilities": [
+    "python3"
+  ],
+  "capabilities_complete": true,
+  "file_owners": {
+    "report/summary.json": "build-report"
+  }
+}

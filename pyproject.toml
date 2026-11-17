@@ -1,0 +1,43 @@
+[build-system]
+requires = ["hatchling>=1.18"]
+build-backend = "hatchling.build"
+
+[project]
+name = "phi-core"
+version = "1.0.2"
+description = "Deterministic three-valued feasibility operator Phi(T, S, E) -> TRUE|FALSE|UNKNOWN with evidence verification, execution gate, audit log and an independent acceptance gate."
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+dependencies = [
+    "jsonschema>=4.18",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "License :: Other/Proprietary License",
+    "Programming Language :: Python :: 3",
+]
+
+[project.optional-dependencies]
+test = [
+    "pytest>=7",
+    "hypothesis>=6.80",
+]
+
+[project.scripts]
+phi = "phi_core.cli:main"
+
+[project.urls]
+Repository = "https://github.com/zionlinne/phi-core"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/phi_core"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"schemas" = "phi_core/_schemas"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "performance: timing measurements (generous bounds; numbers are recorded, not claimed as guarantees)",
+]

@@ -1,0 +1,21 @@
+{
+  "contract_version": "0.1-draft",
+  "task_id": "example-001",
+  "objective": "Produce a build artifact for module X on the target platform.",
+  "constraints": [
+    {
+      "constraint_id": "c1",
+      "kind": "hard",
+      "statement": "The target toolchain must be available in the execution environment."
+    },
+    {
+      "constraint_id": "c2",
+      "kind": "soft",
+      "statement": "Build should finish within the usual time budget."
+    }
+  ],
+  "required_evidence": ["toolchain_probe", "environment_manifest"],
+  "metadata": {
+    "note": "Illustrative sample only. Structural validity says nothing about feasibility or acceptance."
+  }
+}

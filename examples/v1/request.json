@@ -1,0 +1,207 @@
+{
+  "protocol": "phi-core/1.0",
+  "checkpoint": "DISPATCH",
+  "contract": {
+    "contract_version": "1.0",
+    "task_id": "build-report",
+    "title": "Build summary report",
+    "objective": "Aggregate data/input.csv into report/summary.json.",
+    "parent_task_id": "monthly-close",
+    "dependencies": [
+      "fetch-data"
+    ],
+    "inputs": [
+      {
+        "path": "data/input.csv",
+        "sha256": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee"
+      }
+    ],
+    "outputs": [
+      {
+        "path": "report/summary.json",
+        "schema": "schemas/summary.schema.json",
+        "schema_sha256": "1d6cb32b4b79eb3ead4da22ac00375548a0b64b493f5f7f5ac3c953a275052bd"
+      }
+    ],
+    "capabilities": [
+      "python3"
+    ],
+    "resources": [
+      {
+        "name": "cpu",
+        "amount": 1
+      }
+    ],
+    "time_bounds": {
+      "not_before": "2026-11-01T00:00:00Z",
+      "deadline": "2026-11-30T00:00:00Z"
+    },
+    "constraints": [
+      {
+        "constraint_id": "tests:unit",
+        "kind": "hard",
+        "category": "postcondition",
+        "statement": "unit tests pass (signed CI attestation)",
+        "predicate": {
+          "type": "attested_value",
+          "params": {
+            "expected": {
+              "passed": true
+            }
+          }
+        },
+        "checkpoints": [
+          "COMMIT"
+        ],
+        "evidence": {
+          "verifiers": [
+            "hmac_attestation"
+          ],
+          "max_age_seconds": 3600
+        }
+      },
+      {
+        "constraint_id": "style:report-readable",
+        "kind": "soft",
+        "statement": "report is readable",
+        "predicate": {
+          "type": "natural_language",
+          "params": {}
+        }
+      }
+    ],
+    "constraint_scope": {
+      "complete": true,
+      "declared_by": "example-host"
+    },
+    "evidence_policy": {
+      "default_max_age_seconds": 3600,
+      "conflict_resolution": {
+        "type": "none"
+      }
+    },
+    "acceptance": {
+      "baseline_id": "report-req",
+      "baseline_revision": 1
+    },
+    "integrity": {
+      "contract_hash": "334711f3200ff0c45e3724fa7c253c5daf1f534da9e98d026c02bf817a850286"
+    }
+  },
+  "state": {
+    "state_version": "1.0",
+    "now": "2026-11-17T00:00:00Z",
+    "tasks": {
+      "fetch-data": {
+        "status": "completed"
+      },
+      "monthly-close": {
+        "status": "running"
+      },
+      "build-report": {
+        "status": "ready"
+      }
+    },
+    "resources": {
+      "cpu": 4
+    },
+    "capabilities": [
+      "python3"
+    ],
+    "capabilities_complete": true,
+    "file_owners": {
+      "report/summary.json": "build-report"
+    }
+  },
+  "evidence": [
+    {
+      "evidence_id": "ev-input:data/input.csv:exists",
+      "constraint_id": "input:data/input.csv:exists",
+      "source": "example-observer",
+      "verifier_id": "file_sha256",
+      "observed_value": {
+        "path": "data/input.csv"
+      },
+      "verification_status": "CLAIMED",
+      "timestamp": "2026-11-16T23:55:00Z",
+      "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
+    },
+    {
+      "evidence_id": "ev-input:data/input.csv:sha256",
+      "constraint_id": "input:data/input.csv:sha256",
+      "source": "example-observer",
+      "verifier_id": "file_sha256",
+      "observed_value": {
+        "path": "data/input.csv"
+      },
+      "verification_status": "CLAIMED",
+      "timestamp": "2026-11-16T23:55:00Z",
+      "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
+    },
+    {
+      "evidence_id": "ev-output:report/summary.json:exists",
+      "constraint_id": "output:report/summary.json:exists",
+      "source": "example-observer",
+      "verifier_id": "file_sha256",
+      "observed_value": {
+        "path": "report/summary.json"
+      },
+      "verification_status": "CLAIMED",
+      "timestamp": "2026-11-16T23:55:00Z",
+      "artifact_hash": "479510595767f53fa920e088f69f48e831425716e7260d4c9ca6d75fbdba08aa",
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
+    },
+    {
+      "evidence_id": "ev-schema",
+      "constraint_id": "output:report/summary.json:schema",
+      "source": "example-observer",
+      "verifier_id": "json_schema",
+      "observed_value": {
+        "path": "report/summary.json",
+        "schema_path": "schemas/summary.schema.json"
+      },
+      "verification_status": "CLAIMED",
+      "timestamp": "2026-11-16T23:55:00Z",
+      "artifact_hash": null,
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
+    },
+    {
+      "evidence_id": "ev-tests",
+      "constraint_id": "tests:unit",
+      "source": "ci-runner",
+      "verifier_id": "hmac_attestation",
+      "observed_value": {
+        "passed": true
+      },
+      "verification_status": "CLAIMED",
+      "timestamp": "2026-11-16T23:55:00Z",
+      "artifact_hash": null,
+      "provenance": {
+        "run": "example-ci-1",
+        "key_id": "ci-demo-key",
+        "signature": "a438667cb0af240eed00ad26175bf352218ea8acf031e3f9463cb6273c2fb25e"
+      },
+      "binding": {
+        "task_id": "build-report",
+        "checkpoints": [
+          "COMMIT"
+        ]
+      }
+    }
+  ],
+  "workspace": "examples/v1/workspace"
+}

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zionlinne/phi-core/schemas/state.v1.schema.json",
+  "title": "phi-core Execution / Scheduling State S v1.0",
+  "description": "Latest host-maintained execution and scheduling state. 'now' is the explicit evaluation time; Phi never reads the wall clock.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["state_version", "now", "tasks"],
+  "properties": {
+    "state_version": { "const": "1.0" },
+    "now": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "tasks": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["status"],
+        "properties": {
+          "status": { "enum": ["pending", "ready", "running", "completed", "failed", "cancelled", "blocked"] }
+        }
+      }
+    },
+    "resources": { "type": "object", "additionalProperties": { "type": "number" } },
+    "capabilities": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "capabilities_complete": { "type": "boolean" },
+    "file_owners": { "type": "object", "additionalProperties": { "type": "string", "minLength": 1 } },
+    "contract_pins": { "type": "object", "additionalProperties": { "type": "string", "pattern": "^[0-9a-f]{64}$" } },
+    "extensions": { "type": "object" }
+  }
+}

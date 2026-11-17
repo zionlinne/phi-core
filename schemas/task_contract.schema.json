@@ -1,0 +1,62 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zionlinne/phi-core/schemas/task_contract.schema.json",
+  "title": "phi-core TaskContract (DRAFT 0.1, engineering protocol only, NOT frozen)",
+  "description": "Structural format of a task contract T. Passing this schema only means the document is structurally well-formed. It does NOT mean the task is feasible, and it does NOT mean final acceptance has passed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "task_id", "objective", "constraints"],
+  "properties": {
+    "contract_version": {
+      "description": "Draft protocol version. Only '0.1-draft' is currently accepted.",
+      "const": "0.1-draft"
+    },
+    "task_id": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._:-]+$"
+    },
+    "objective": {
+      "description": "Human-readable statement of what the task is meant to achieve.",
+      "type": "string",
+      "minLength": 1
+    },
+    "constraints": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/constraint" }
+    },
+    "required_evidence": {
+      "description": "Kinds of evidence the contract author expects to be supplied. Semantics are undecided.",
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "metadata": {
+      "description": "Free-form, non-normative metadata. Ignored by validation semantics.",
+      "type": "object"
+    }
+  },
+  "$defs": {
+    "constraint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["constraint_id", "kind", "statement"],
+      "properties": {
+        "constraint_id": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^[A-Za-z0-9._:-]+$"
+        },
+        "kind": {
+          "description": "Provisional label. 'hard' / 'soft' carry NO priority or evaluation semantics in this phase.",
+          "enum": ["hard", "soft"]
+        },
+        "statement": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}
