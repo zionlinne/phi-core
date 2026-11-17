@@ -220,6 +220,13 @@ ESCAPES = [
     ("absolute-alias-into-workspace",
      lambda ws, out: (write(ws, "check.py", EXIT0), (out / "alias.py").symlink_to(ws / "check.py")),
      lambda ws, out: ["{python}", str(out / "alias.py")], "COMMAND_ABSOLUTE_WORKSPACE_PATH"),
+    ("host-path-through-workspace-link",
+     lambda ws, out: ((ws / "check.py").symlink_to(out / "evil.py"), (out / "alias.py").symlink_to(ws / "check.py")),
+     lambda ws, out: ["{python}", str(out / "alias.py")], "COMMAND_ABSOLUTE_WORKSPACE_PATH"),
+    ("host-dir-through-workspace-dir",
+     lambda ws, out: ((ws / "sub").mkdir(), (out / "via").symlink_to(ws / "sub", target_is_directory=True)),
+     lambda ws, out: ["{python}", str(out / "via" / ".." / ".." / "outside" / "evil.py")],
+     "COMMAND_ABSOLUTE_WORKSPACE_PATH"),
 ]
 
 

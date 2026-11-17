@@ -70,6 +70,38 @@ def _inside(root: Path, p: Path) -> bool:
     return True
 
 
+def _visited(path: str, limit: int = 64) -> list[Path]:
+    """Every path visited while resolving ``path`` component by component,
+    including each symlink location and each directory traversed."""
+    p = Path(path)
+    cur = Path(p.anchor or os.sep)
+    pending = list(p.parts[1:]) if p.anchor else list(p.parts)
+    seen, hops = [cur], 0
+    while pending:
+        part = pending.pop(0)
+        if part in ("", "."):
+            continue
+        if part == "..":
+            cur = cur.parent
+            seen.append(cur)
+            continue
+        nxt = cur / part
+        seen.append(nxt)
+        if os.path.islink(nxt):
+            hops += 1
+            if hops > limit:
+                break
+            target = Path(os.readlink(nxt))
+            if target.is_absolute():
+                cur = Path(target.anchor)
+                pending = list(target.parts[1:]) + pending
+            else:
+                pending = list(target.parts) + pending
+        else:
+            cur = nxt
+    return seen
+
+
 @dataclass
 class _Paths:
     ws: Path      # absolute, as given
@@ -78,6 +110,18 @@ class _Paths:
     def lexical_inside(self, p: Path) -> bool:
         p = Path(os.path.normpath(p))
         return _inside(self.ws, p) or _inside(self.root, p)
+
+    def host_path_touches_workspace(self, path: str) -> bool:
+        """True when resolving a host path passes through the workspace at any
+        hop, so the producer could redirect it."""
+        if self.lexical_inside(Path(path)):
+            return True
+        try:
+            if _inside(self.root, Path(path).resolve()):
+                return True
+        except (OSError, RuntimeError):
+            pass
+        return any(self.lexical_inside(v) for v in _visited(path))
 
     def resolve(self, cand: Path, token: str) -> Path:
         try:
@@ -95,15 +139,8 @@ class _Paths:
             return None
         p = Path(tok)
         if p.is_absolute():
-            if self.lexical_inside(p):
+            if self.host_path_touches_workspace(tok):
                 raise _inc("COMMAND_ABSOLUTE_WORKSPACE_PATH", token=tok)
-            if os.path.lexists(p):
-                try:
-                    real = p.resolve(strict=True)
-                except (OSError, RuntimeError):
-                    return None
-                if _inside(self.root, real):
-                    raise _inc("COMMAND_ABSOLUTE_WORKSPACE_PATH", token=tok)
             return None
         norm = os.path.normpath(tok)
         if norm == ".." or norm.startswith(".." + os.sep) or norm.startswith("../"):
@@ -224,7 +261,7 @@ def _clean_path(path_value: str, paths: _Paths) -> str:
     for entry in path_value.split(os.pathsep):
         if not entry or not os.path.isabs(entry):
             continue
-        if paths.lexical_inside(Path(entry)) or _inside(paths.root, Path(entry).resolve()):
+        if paths.host_path_touches_workspace(entry):
             continue
         keep.append(entry)
     return os.pathsep.join(keep)
@@ -241,7 +278,7 @@ def _plan_external(argv: list[str], paths: _Paths, path_value: str) -> _Plan:
         found = shutil.which(prog, path=path_value)
         if found is None:
             raise _inc("COMMAND_NOT_RUNNABLE", reason="program not found on PATH", program=prog)
-        if _inside(paths.root, Path(found).resolve()):
+        if paths.host_path_touches_workspace(found):
             raise _inc("COMMAND_PROGRAM_IN_WORKSPACE", program=prog)
         plan.argv[0] = found
     for tok in argv[1:]:
@@ -447,7 +484,7 @@ def _run(spec, workspace: Path, command_env):
 
     argv = list(spec["argv"])
     if argv[0] == "{python}":
-        if _inside(paths.root, Path(sys.executable).resolve()):
+        if paths.host_path_touches_workspace(sys.executable):
             raise _inc("COMMAND_INTERPRETER_IN_WORKSPACE")
         argv = [sys.executable if a == "{python}" else a for a in argv]
         plan = _plan_python(argv, paths)
