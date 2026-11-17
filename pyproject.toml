@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "phi-core"
-version = "0.0.1.dev0"
-description = "Engineering scaffold for an independent three-valued feasibility operator Phi(T, E). The operator itself is NOT implemented yet."
+version = "1.0.0"
+description = "Deterministic three-valued feasibility operator Phi(T, S, E) -> TRUE|FALSE|UNKNOWN with evidence verification, execution gate, audit log and an independent acceptance gate."
 readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.11"
@@ -13,7 +13,7 @@ dependencies = [
     "jsonschema>=4.18",
 ]
 classifiers = [
-    "Development Status :: 1 - Planning",
+    "Development Status :: 4 - Beta",
     "License :: Other/Proprietary License",
     "Programming Language :: Python :: 3",
 ]
@@ -21,6 +21,7 @@ classifiers = [
 [project.optional-dependencies]
 test = [
     "pytest>=7",
+    "hypothesis>=6.80",
 ]
 
 [project.scripts]
@@ -33,7 +34,10 @@ Repository = "https://github.com/zionlinne/phi-core"
 packages = ["src/phi_core"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"schemas/task_contract.schema.json" = "phi_core/_schemas/task_contract.schema.json"
+"schemas" = "phi_core/_schemas"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "performance: timing measurements (generous bounds; numbers are recorded, not claimed as guarantees)",
+]
