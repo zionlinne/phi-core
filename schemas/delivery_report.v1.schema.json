@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zionlinne/phi-core/schemas/delivery_report.v1.schema.json",
+  "title": "phi-core Delivery Report v1.0 (producer-supplied, untrusted)",
+  "description": "What the producer claims to have delivered. Claims and any producer-supplied criteria are recorded but never decide acceptance.",
+  "type": "object",
+  "required": ["delivery_version", "baseline_id", "baseline_revision", "trace"],
+  "properties": {
+    "delivery_version": { "const": "1.0" },
+    "baseline_id": { "type": "string", "minLength": 1 },
+    "baseline_revision": { "type": "integer", "minimum": 1 },
+    "produced_by": { "type": "string" },
+    "claimed_status": {},
+    "trace": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["requirement_id"],
+        "properties": {
+          "requirement_id": { "type": "string", "minLength": 1 },
+          "artifacts": { "type": "array", "items": { "type": "string" } },
+          "notes": { "type": "string" }
+        }
+      }
+    },
+    "evidence": { "type": "array" }
+  }
+}

@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/zionlinne/phi-core/schemas/requirements_baseline.v1.schema.json",
+  "title": "phi-core Acceptance Requirements Baseline v1.0",
+  "description": "Frozen original requirements and design reference. Its canonical hash must match an independently held anchor.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["baseline_version", "baseline_id", "revision", "previous_revision_hash", "frozen_at", "design", "requirements", "change_log"],
+  "properties": {
+    "baseline_version": { "const": "1.0" },
+    "baseline_id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._:-]+$" },
+    "revision": { "type": "integer", "minimum": 1 },
+    "previous_revision_hash": { "anyOf": [{ "type": "string", "pattern": "^[0-9a-f]{64}$" }, { "type": "null" }] },
+    "frozen_at": {
+      "type": "string",
+      "pattern": "^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}(\\.\\d+)?(Z|[+-]\\d{2}:\\d{2})$"
+    },
+    "design": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["design_id", "version", "sha256", "path"],
+      "properties": {
+        "design_id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 },
+        "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "path": { "$ref": "#/$defs/relpath" }
+      }
+    },
+    "requirements": { "type": "array", "items": { "$ref": "#/$defs/requirement" } },
+    "change_log": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["revision", "summary"],
+        "properties": {
+          "revision": { "type": "integer", "minimum": 1 },
+          "summary": { "type": "string", "minLength": 1 },
+          "added": { "type": "array", "items": { "type": "string" } },
+          "removed": { "type": "array", "items": { "type": "string" } },
+          "modified": { "type": "array", "items": { "type": "string" } }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "relpath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?![/\\\\])(?![A-Za-z]:)(?!.*(^|[/\\\\])\\.\\.([/\\\\]|$)).+$"
+    },
+    "requirement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["requirement_id", "text", "verification"],
+      "properties": {
+        "requirement_id": { "type": "string", "minLength": 1, "pattern": "^[A-Za-z0-9._:-]+$" },
+        "text": { "type": "string", "minLength": 1 },
+        "design_ref": { "type": "string" },
+        "verification": {
+          "oneOf": [
+            {
+              "type": "object", "additionalProperties": false, "required": ["method", "path"],
+              "properties": {
+                "method": { "const": "file" },
+                "path": { "$ref": "#/$defs/relpath" },
+                "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" }
+              }
+            },
+            {
+              "type": "object", "additionalProperties": false, "required": ["method", "argv"],
+              "properties": {
+                "method": { "const": "command" },
+                "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
+                "expected_exit_code": { "type": "integer" }
+              }
+            },
+            {
+              "type": "object", "additionalProperties": false, "required": ["method", "path", "schema_path"],
+              "properties": {
+                "method": { "const": "json_schema" },
+                "path": { "$ref": "#/$defs/relpath" },
+                "schema_path": { "$ref": "#/$defs/relpath" }
+              }
+            },
+            {
+              "type": "object", "additionalProperties": false, "required": ["method", "evidence_constraint_id", "expected"],
+              "properties": {
+                "method": { "const": "evidence" },
+                "evidence_constraint_id": { "type": "string", "minLength": 1 },
+                "expected": {},
+                "verifiers": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+                "max_age_seconds": { "type": "integer", "minimum": 0 }
+              }
+            },
+            {
+              "type": "object", "additionalProperties": false, "required": ["method"],
+              "properties": { "method": { "enum": ["manual", "llm_judgment"] }, "note": { "type": "string" } }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
