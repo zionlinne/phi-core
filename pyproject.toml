@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "phi-core"
-version = "1.0.1"
+version = "1.0.2"
 description = "Deterministic three-valued feasibility operator Phi(T, S, E) -> TRUE|FALSE|UNKNOWN with evidence verification, execution gate, audit log and an independent acceptance gate."
 readme = "README.md"
 license = { file = "LICENSE" }

@@ -58,6 +58,7 @@ from .evidence import (
 from .gate import (
     Decision,
     DecisionInvalid,
+    EvidenceProviderError,
     GateBlocked,
     GateDenied,
     GatedRunner,
@@ -81,6 +82,6 @@ from .predicates import (
 )
 from .safeschema import SchemaCheck, check_document, pin_issue
 
-__version__ = "1.0.1"
+__version__ = "1.0.2"
 
 __all__ = [name for name in dir() if not name.startswith("_")] + ["__version__"]

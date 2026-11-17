@@ -55,7 +55,7 @@ from .predicates import (
 )
 from .schemas import schema_errors
 
-EVALUATOR_VERSION = "phi-core/1.0.1"
+EVALUATOR_VERSION = "phi-core/1.0.2"
 DEFAULT_MAX_AGE_SECONDS = 3600
 
 
