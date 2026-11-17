@@ -46,6 +46,19 @@ def sha256_file(path: str | Path) -> str:
     return h.hexdigest()
 
 
+def resolve_in_workspace(workspace: Path, rel: Any) -> Path | None:
+    """Resolve ``rel`` under ``workspace``; None if it is not a safe relative path inside it."""
+    if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or "\x00" in rel:
+        return None
+    root = Path(workspace).resolve()
+    target = (root / rel).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return None
+    return target
+
+
 def freeze(obj: Any) -> Any:
     """Recursively read-only view of JSON data (dict -> MappingProxyType, list -> tuple)."""
     if isinstance(obj, dict):

@@ -149,6 +149,8 @@ def build_parser() -> argparse.ArgumentParser:
     e.add_argument("--workspace", required=True)
     e.add_argument("--now", required=True)
     e.add_argument("--source", default="local-observer")
+    e.add_argument("--checkpoint", choices=CHECKPOINTS,
+                   help="bind the observations to this checkpoint only (default: any checkpoint of the task)")
     e = esub.add_parser("sign", help="HMAC-sign evidence item(s) with a trust-store key")
     e.add_argument("file")
     e.add_argument("--trust", required=True)
@@ -249,7 +251,8 @@ def _cmd_audit(args) -> int:
 
 def _cmd_evidence(args) -> int:
     if args.evidence_command == "observe":
-        _emit(observe_files(_load(args.contract), args.workspace, args.now, source=args.source))
+        _emit(observe_files(_load(args.contract), args.workspace, args.now, source=args.source,
+                           checkpoint=args.checkpoint))
         return 0
     if args.evidence_command == "sign":
         store = _load(args.trust)

@@ -116,7 +116,17 @@
         "path": { "$ref": "#/$defs/relpath" },
         "owner": { "$ref": "#/$defs/id" },
         "sha256": { "$ref": "#/$defs/sha256" },
-        "schema": { "$ref": "#/$defs/relpath" }
+        "schema": { "$ref": "#/$defs/relpath" },
+        "schema_sha256": {
+          "description": "Frozen SHA-256 of the schema file bytes. Without it the schema constraint is never SATISFIED.",
+          "$ref": "#/$defs/sha256"
+        },
+        "schema_refs": {
+          "description": "Frozen SHA-256 of every workspace schema document the root schema may $ref (relpath -> sha256). Remote and file:// references are never fetched.",
+          "type": "object",
+          "propertyNames": { "$ref": "#/$defs/relpath" },
+          "additionalProperties": { "$ref": "#/$defs/sha256" }
+        }
       }
     },
     "resource": {

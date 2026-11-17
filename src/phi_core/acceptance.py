@@ -9,6 +9,15 @@ Trust model:
   where the producer cannot write (optionally HMAC-signed by an authority key).
   Recomputing the baseline hash does not help a producer: the anchor, not the
   baseline file, is the reference.
+* Only keys provisioned with the ``baseline-anchor`` purpose can sign anchor
+  entries; evidence keys cannot, whatever their ``sources``. Once a revision is
+  signed, later unsigned revisions are rejected.
+* Criteria that live in the workspace (JSON Schemas, scripts, configs) count
+  only when their bytes are frozen in the baseline (``schema_sha256`` /
+  ``schema_refs`` / ``pinned_files``). Schemas never trigger network or
+  ``file://`` retrieval.
+* Delivery evidence counts only when its signed ``binding`` names this
+  baseline.
 * Producer claims (``claimed_status``, extra criteria fields) are recorded and
   ignored.
 * Anything that cannot be verified is INCONCLUSIVE, never PASS. ``manual`` and
@@ -27,22 +36,21 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping
 
-from jsonschema import Draft202012Validator
-
-from .canonical import canonical_json, hash_obj, parse_time, sha256_file
+from .canonical import canonical_json, hash_obj, parse_time, resolve_in_workspace, sha256_file
 from .evidence import (
+    PURPOSE_BASELINE_ANCHOR,
     TrustStore,
     VerificationContext,
     VerifierRegistry,
     VStatus,
     default_verifier_registry,
     hmac_hex,
-    resolve_in_workspace,
     verify_evidence,
 )
+from .safeschema import check_document, pin_issue
 from .schemas import schema_errors
 
-ACCEPTANCE_VERSION = "phi-core-acceptance/1.0.0"
+ACCEPTANCE_VERSION = "phi-core-acceptance/1.0.1"
 DEFAULT_EVIDENCE_MAX_AGE = 86400
 _DELIVERY_KNOWN_FIELDS = {"delivery_version", "baseline_id", "baseline_revision", "produced_by",
                           "claimed_status", "trace", "evidence"}
@@ -111,7 +119,11 @@ def _tail(text: str, n: int = 2000) -> str:
 
 
 class _Ctx:
-    def __init__(self, workspace: Path, now, trust_store, verifiers, command_env, delivery_evidence):
+    def __init__(self, workspace: Path, now, trust_store, verifiers, command_env, delivery_evidence,
+                 baseline_id=None, baseline_revision=None):
+        self.baseline_id = baseline_id
+        self.baseline_revision = baseline_revision
+        self.requirement_id = None
         self.workspace = workspace
         self.now = now
         self.trust_store = trust_store
@@ -139,8 +151,79 @@ def _check_file(spec, ctx):
     return AStatus.PASS, ["FILE_VERIFIED"], {"sha256": actual}
 
 
+def _pin_problem(spec, ctx, modified_code):
+    """First pinned criterion file that is missing or differs from its frozen hash."""
+    for pin in spec.get("pinned_files", []):
+        target = resolve_in_workspace(ctx.workspace, pin["path"])
+        if target is None or not target.is_file():
+            return "COMMAND_PINNED_FILE_MISSING", pin["path"]
+        if sha256_file(target) != pin["sha256"]:
+            return modified_code, pin["path"]
+    return None
+
+
+def _workspace_path(root: Path, token: str) -> Path | None:
+    if not token or "\x00" in token:
+        return None
+    if Path(token).is_absolute():
+        p = Path(token).resolve()
+        try:
+            p.relative_to(root)
+        except ValueError:
+            return None
+        return p
+    return resolve_in_workspace(root, token)
+
+
+def _unpinned_workspace_files(argv, spec, ws: Path) -> list[str]:
+    """Workspace files that argv names directly (a path token, ``-m module``, or
+    ``--opt=path``) but that are neither pinned nor declared artifacts.
+
+    This is a guard against the common "run a script from the delivery" case,
+    not an enumeration of what the program reads: imports, config discovery,
+    fixtures and data opened by name inside the program are invisible here and
+    must be listed in ``pinned_files`` by the baseline author."""
+    root = ws.resolve()
+    pinned = {p for p in (resolve_in_workspace(root, x["path"]) for x in spec.get("pinned_files", [])) if p}
+    artifacts = [p for p in (resolve_in_workspace(root, a) for a in spec.get("artifacts", [])) if p]
+
+    def is_artifact(p: Path) -> bool:
+        return any(p == a or a in p.parents for a in artifacts)
+
+    found: set[str] = set()
+    prev = None
+    for tok in argv:
+        cands = []
+        if prev == "-m":
+            mod = tok.replace(".", "/")
+            cands += [f"{mod}.py", f"{mod}/__main__.py", f"{mod}/__init__.py"]
+        cands.append(tok)
+        if tok.startswith("-") and "=" in tok:
+            cands.append(tok.split("=", 1)[1])
+        for cand in cands:
+            p = _workspace_path(root, cand)
+            if p is None or not p.exists():
+                continue
+            files = [p] if p.is_file() else sorted(f.resolve() for f in p.rglob("*") if f.is_file())
+            for f in files:
+                if f not in pinned and not is_artifact(f):
+                    found.add(str(f.relative_to(root)))
+        prev = tok
+    return sorted(found)
+
+
 def _check_command(spec, ctx):
+    """Supported, auditable command protocol: the argv text is frozen by the
+    baseline hash; every workspace file that is part of the criterion is frozen
+    in ``pinned_files`` and re-hashed before and after the run; argv tokens that
+    name unpinned, undeclared workspace files make the result INCONCLUSIVE."""
     argv = [sys.executable if a == "{python}" else a for a in spec["argv"]]
+    problem = _pin_problem(spec, ctx, "COMMAND_PINNED_FILE_MODIFIED")
+    if problem is not None:
+        return AStatus.FAIL, [problem[0]], {"path": problem[1]}
+    unpinned = _unpinned_workspace_files(argv, spec, ctx.workspace)
+    if unpinned:
+        return AStatus.INCONCLUSIVE, ["COMMAND_WORKSPACE_FILE_NOT_PINNED"], {"unpinned": unpinned[:50]}
     env = ctx.command_env if ctx.command_env is not None else {"PATH": os.environ.get("PATH", "")}
     try:
         proc = subprocess.run(argv, cwd=ctx.workspace, capture_output=True, text=True, shell=False,
@@ -149,7 +232,11 @@ def _check_command(spec, ctx):
         return AStatus.INCONCLUSIVE, ["COMMAND_TIMEOUT"], {}
     except OSError as exc:
         return AStatus.INCONCLUSIVE, ["COMMAND_NOT_RUNNABLE"], {"error": type(exc).__name__}
-    detail = {"exit_code": proc.returncode, "stdout_tail": _tail(proc.stdout), "stderr_tail": _tail(proc.stderr)}
+    detail = {"exit_code": proc.returncode, "stdout_tail": _tail(proc.stdout), "stderr_tail": _tail(proc.stderr),
+              "pinned_files_verified": [p["path"] for p in spec.get("pinned_files", [])]}
+    problem = _pin_problem(spec, ctx, "COMMAND_PINNED_FILE_MODIFIED_DURING_RUN")
+    if problem is not None:
+        return AStatus.FAIL, [problem[0]], {**detail, "path": problem[1]}
     if proc.returncode == spec.get("expected_exit_code", 0):
         return AStatus.PASS, ["COMMAND_EXIT_CODE_AS_EXPECTED"], detail
     return AStatus.FAIL, ["COMMAND_EXIT_CODE_UNEXPECTED"], detail
@@ -157,26 +244,25 @@ def _check_command(spec, ctx):
 
 def _check_json_schema(spec, ctx):
     target = resolve_in_workspace(ctx.workspace, spec["path"])
-    schema_path = resolve_in_workspace(ctx.workspace, spec["schema_path"])
-    if target is None or schema_path is None:
+    if target is None or resolve_in_workspace(ctx.workspace, spec["schema_path"]) is None:
         return AStatus.FAIL, ["PATH_OUTSIDE_WORKSPACE"], {}
-    if not schema_path.is_file():
-        return AStatus.INCONCLUSIVE, ["SCHEMA_FILE_MISSING"], {}
-    try:
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        Draft202012Validator.check_schema(schema)
-    except Exception:  # noqa: BLE001
-        return AStatus.INCONCLUSIVE, ["SCHEMA_FILE_INVALID"], {}
     if not target.is_file():
         return AStatus.FAIL, ["FILE_MISSING"], {}
     try:
         doc = json.loads(target.read_text(encoding="utf-8"))
     except ValueError:
         return AStatus.FAIL, ["OUTPUT_NOT_JSON"], {}
-    errors = [e.message for e in Draft202012Validator(schema).iter_errors(doc)]
-    if errors:
-        return AStatus.FAIL, ["SCHEMA_INCOMPATIBLE"], {"errors": errors[:20]}
-    return AStatus.PASS, ["SCHEMA_COMPATIBLE"], {}
+    check = check_document(ctx.workspace, spec["schema_path"], doc)
+    detail = {"schema_closure": dict(check.closure)}
+    if check.code is not None:
+        return AStatus.INCONCLUSIVE, [check.code], detail
+    issue = pin_issue(check.closure, spec["schema_path"], spec.get("schema_sha256"), spec.get("schema_refs"))
+    if issue is not None:
+        kind, code = issue
+        return (AStatus.FAIL if kind == "violated" else AStatus.INCONCLUSIVE), [code], detail
+    if not check.valid:
+        return AStatus.FAIL, ["SCHEMA_INCOMPATIBLE"], {**detail, "errors": list(check.errors)}
+    return AStatus.PASS, ["SCHEMA_COMPATIBLE"], detail
 
 
 def _check_evidence(spec, ctx):
@@ -189,6 +275,19 @@ def _check_evidence(spec, ctx):
         if r.status is not VStatus.VERIFIED:
             reasons.add(f"EVIDENCE_{r.status.value}")
             reasons.update(r.reason_codes)
+            continue
+        binding = r.binding if isinstance(r.binding, Mapping) else {}
+        if "baseline_id" not in binding:
+            reasons.add("EVIDENCE_NOT_BOUND_TO_BASELINE")
+            continue
+        if binding["baseline_id"] != ctx.baseline_id:
+            reasons.add("EVIDENCE_BOUND_TO_OTHER_BASELINE")
+            continue
+        if "baseline_revision" in binding and binding["baseline_revision"] != ctx.baseline_revision:
+            reasons.add("EVIDENCE_BOUND_TO_OTHER_REVISION")
+            continue
+        if "requirement_id" in binding and binding["requirement_id"] != ctx.requirement_id:
+            reasons.add("EVIDENCE_BOUND_TO_OTHER_REQUIREMENT")
             continue
         if r.verifier_id not in allowed:
             reasons.add("EVIDENCE_VERIFIER_NOT_ALLOWED")
@@ -228,14 +327,21 @@ def _verify_anchor(baseline, anchor, b_hash, trust_store, require_signed):
     for prev, cur in zip(revs, revs[1:]):
         if cur["revision"] != prev["revision"] + 1 or cur["previous_revision_hash"] != prev["baseline_hash"]:
             return fails, ["ANCHOR_CHAIN_INVALID"], None
+    signed_seen = False
     for e in revs:
-        if "signature" in e or "key_id" in e:
-            key = trust_store.keys.get(e.get("key_id")) if trust_store else None
-            if key is None:
-                incs.append("ANCHOR_KEY_UNKNOWN")
-            elif not hmac.compare_digest(
-                    hmac_hex(key.secret, anchor_signing_payload(anchor["baseline_id"], e)), e.get("signature", "")):
-                fails.append("ANCHOR_SIGNATURE_INVALID")
+        if "signature" not in e and "key_id" not in e:
+            if signed_seen:
+                fails.append("ANCHOR_UNSIGNED_REVISION_AFTER_SIGNED")
+            continue
+        signed_seen = True
+        key = trust_store.keys.get(e.get("key_id")) if trust_store else None
+        if key is None:
+            incs.append("ANCHOR_KEY_UNKNOWN")
+        elif not hmac.compare_digest(
+                hmac_hex(key.secret, anchor_signing_payload(anchor["baseline_id"], e)), e.get("signature", "")):
+            fails.append("ANCHOR_SIGNATURE_INVALID")
+        elif PURPOSE_BASELINE_ANCHOR not in key.purposes:
+            fails.append("ANCHOR_KEY_NOT_AUTHORIZED_FOR_BASELINE")
     current = revs[-1]
     if require_signed and "signature" not in current:
         incs.append("ANCHOR_UNSIGNED")
@@ -327,8 +433,10 @@ def run_acceptance(baseline: Any, anchor: Any, delivery: Any, *, workspace: str 
         report["ignored_producer_fields"] = ignored
         report["untraced_delivery_entries"] = sorted(set(trace) - set(req_ids))
 
-    ctx = _Ctx(ws, now_dt, trust_store, verifiers or default_verifier_registry(), command_env, delivery_evidence)
+    ctx = _Ctx(ws, now_dt, trust_store, verifiers or default_verifier_registry(), command_env, delivery_evidence,
+               baseline["baseline_id"], baseline["revision"])
     for req in baseline["requirements"]:
+        ctx.requirement_id = req["requirement_id"]
         spec = req["verification"]
         method = spec["method"]
         if method == "manual":
@@ -336,7 +444,10 @@ def run_acceptance(baseline: Any, anchor: Any, delivery: Any, *, workspace: str 
         elif method == "llm_judgment":
             status, codes, detail = AStatus.INCONCLUSIVE, ["LLM_JUDGMENT_CANNOT_DECIDE_PASS"], {}
         else:
-            status, codes, detail = _METHODS[method](spec, ctx)
+            try:
+                status, codes, detail = _METHODS[method](spec, ctx)
+            except Exception as exc:  # noqa: BLE001 - a crashing check is never PASS and never escapes
+                status, codes, detail = AStatus.INCONCLUSIVE, ["VERIFICATION_ERROR"], {"error": type(exc).__name__}
         codes = list(codes)
         if req["requirement_id"] not in trace:
             status = AStatus.FAIL

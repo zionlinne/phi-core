@@ -13,6 +13,7 @@ from enum import Enum
 from typing import Any, Callable, Mapping
 
 from .canonical import parse_time
+from .safeschema import pin_issue
 
 
 class Status(str, Enum):
@@ -212,8 +213,23 @@ class FileHash(_PathSubject):
 
 
 class SchemaCompatible(_PathSubject):
+    """The schema is a criterion and must be frozen: ``schema_sha256`` pins the
+    root document and ``schema_refs`` ({relpath: sha256}) pins every document it
+    may reference. The verifier reports the closure it actually loaded; an
+    unpinned document is UNRESOLVED, a pinned one with different bytes is a
+    verified violation (the frozen criterion was replaced)."""
+
     required_params = {"path": (str,), "schema_path": (str,)}
     default_verifiers = ("json_schema",)
+
+    def param_errors(self, params):
+        errors = super().param_errors(params)
+        if "schema_sha256" in params and not isinstance(params["schema_sha256"], str):
+            errors.append("param schema_sha256 has wrong type")
+        refs = params.get("schema_refs", {})
+        if not isinstance(refs, Mapping) or not all(isinstance(v, str) for v in refs.values()):
+            errors.append("param schema_refs must map relpath -> sha256")
+        return errors
 
     def subject_matches(self, params, observed):
         return super().subject_matches(params, observed) and observed.get("schema_path") == params["schema_path"]
@@ -221,6 +237,13 @@ class SchemaCompatible(_PathSubject):
     def judge(self, params, observed):
         if observed.get("exists") is False:
             return violated("FILE_MISSING")
+        closure = observed.get("schema_closure")
+        if not isinstance(closure, Mapping):
+            return unresolved("SCHEMA_CLOSURE_NOT_OBSERVED")
+        issue = pin_issue(closure, params["schema_path"], params.get("schema_sha256"), params.get("schema_refs"))
+        if issue is not None:
+            kind, code = issue
+            return violated(code) if kind == "violated" else unresolved(code)
         valid = observed.get("valid")
         if valid is True:
             return sat()

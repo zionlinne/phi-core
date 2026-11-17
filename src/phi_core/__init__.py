@@ -40,6 +40,8 @@ from .evaluator import (
     evaluate,
 )
 from .evidence import (
+    PURPOSE_BASELINE_ANCHOR,
+    PURPOSE_EVIDENCE,
     EvidenceFormatError,
     EvidenceItem,
     TrustStore,
@@ -77,7 +79,8 @@ from .predicates import (
     Status,
     default_predicate_registry,
 )
+from .safeschema import SchemaCheck, check_document, pin_issue
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = [name for name in dir() if not name.startswith("_")] + ["__version__"]

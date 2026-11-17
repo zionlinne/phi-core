@@ -27,15 +27,21 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Iterable, Mapping, Protocol
 
-from jsonschema import Draft202012Validator
-
-from .canonical import canonical_json, format_time, parse_time, sha256_file
+from .canonical import canonical_json, format_time, parse_time, resolve_in_workspace, sha256_file
+from .safeschema import check_document
 from .schemas import schema_errors
 
 EVIDENCE_FIELDS = (
     "evidence_id", "constraint_id", "source", "verifier_id", "observed_value",
     "verification_status", "timestamp", "artifact_hash", "provenance",
 )
+# Optional, covered by the signature. Phi uses evidence only when binding.task_id
+# names the evaluated task; Acceptance only when binding.baseline_id names the baseline.
+OPTIONAL_EVIDENCE_FIELDS = ("binding",)
+
+PURPOSE_EVIDENCE = "evidence"
+PURPOSE_BASELINE_ANCHOR = "baseline-anchor"
+KEY_PURPOSES = frozenset({PURPOSE_EVIDENCE, PURPOSE_BASELINE_ANCHOR})
 
 
 class EvidenceFormatError(ValueError):
@@ -59,6 +65,7 @@ class EvidenceItem:
     timestamp: str
     artifact_hash: str | None
     provenance: Mapping[str, Any]
+    binding: Mapping[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: Any) -> "EvidenceItem":
@@ -70,10 +77,13 @@ class EvidenceItem:
         errors = schema_errors("evidence", dict(data))
         if errors:
             raise EvidenceFormatError("; ".join(errors))
-        return cls(**{k: copy.deepcopy(data[k]) for k in EVIDENCE_FIELDS})
+        return cls(**{k: copy.deepcopy(data[k]) for k in EVIDENCE_FIELDS + OPTIONAL_EVIDENCE_FIELDS if k in data})
 
     def to_dict(self) -> dict[str, Any]:
-        return {k: copy.deepcopy(getattr(self, k)) for k in EVIDENCE_FIELDS}
+        out = {k: copy.deepcopy(getattr(self, k)) for k in EVIDENCE_FIELDS}
+        if self.binding is not None:
+            out["binding"] = copy.deepcopy(self.binding)
+        return out
 
 
 @dataclass(frozen=True)
@@ -87,6 +97,7 @@ class VerificationResult:
     observed: Any
     timestamp: str | None
     claimed_status: Any
+    binding: Mapping[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,6 +110,7 @@ class VerificationResult:
             "observed": copy.deepcopy(self.observed),
             "timestamp": self.timestamp,
             "claimed_status": copy.deepcopy(self.claimed_status),
+            "binding": copy.deepcopy(self.binding),
         }
 
     @classmethod
@@ -108,6 +120,7 @@ class VerificationResult:
             verifier_id=d.get("verifier_id"), status=VStatus(d["status"]),
             reason_codes=tuple(d.get("reason_codes", ())), observed=copy.deepcopy(d.get("observed")),
             timestamp=d.get("timestamp"), claimed_status=copy.deepcopy(d.get("claimed_status")),
+            binding=copy.deepcopy(d.get("binding")),
         )
 
 
@@ -117,6 +130,7 @@ def _result(item: EvidenceItem, status: VStatus, *codes: str, observed: Any = No
         verifier_id=item.verifier_id, status=status, reason_codes=tuple(codes),
         observed=observed if status is VStatus.VERIFIED else None,
         timestamp=item.timestamp, claimed_status=item.verification_status,
+        binding=copy.deepcopy(item.binding),
     )
 
 
@@ -128,24 +142,35 @@ class TrustedKey:
     key_id: str
     secret: bytes
     sources: frozenset[str]
+    purposes: frozenset[str] = frozenset({PURPOSE_EVIDENCE})
 
 
 @dataclass
 class TrustStore:
-    """Host-provisioned HMAC keys. Keys must reach the host out-of-band, never via evidence."""
+    """Host-provisioned HMAC keys. Keys must reach the host out-of-band, never via evidence.
+
+    ``purposes`` separates authority domains: ``evidence`` keys may sign
+    evidence claims, ``baseline-anchor`` keys may sign acceptance anchor
+    entries. A key is usable only for the purposes it was provisioned with
+    (default: ``evidence`` only)."""
 
     keys: dict[str, TrustedKey] = field(default_factory=dict)
 
-    def add_key(self, key_id: str, secret: bytes, sources: Iterable[str]) -> None:
+    def add_key(self, key_id: str, secret: bytes, sources: Iterable[str],
+                purposes: Iterable[str] = (PURPOSE_EVIDENCE,)) -> None:
         if len(secret) < 16:
             raise ValueError("HMAC secret must be at least 16 bytes")
-        self.keys[key_id] = TrustedKey(key_id, bytes(secret), frozenset(sources))
+        purposes = frozenset(purposes)
+        if not purposes or not purposes <= KEY_PURPOSES:
+            raise ValueError(f"key purposes must be a non-empty subset of {sorted(KEY_PURPOSES)}")
+        self.keys[key_id] = TrustedKey(key_id, bytes(secret), frozenset(sources), purposes)
 
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "TrustStore":
         store = cls()
         for key_id, spec in data.get("keys", {}).items():
-            store.add_key(key_id, bytes.fromhex(spec["secret_hex"]), spec.get("sources", []))
+            store.add_key(key_id, bytes.fromhex(spec["secret_hex"]), spec.get("sources", []),
+                          spec.get("purposes", [PURPOSE_EVIDENCE]))
         return store
 
     @classmethod
@@ -189,28 +214,20 @@ class VerificationContext:
 
 
 class Verifier(Protocol):
+    """``reobserves = True`` declares that the verified value is recomputed from
+    the evaluation's own workspace rather than taken from the claim; only such
+    evidence may be used without a task binding."""
+
     verifier_id: str
 
     def verify(self, item: EvidenceItem, ctx: VerificationContext) -> VerificationResult: ...
-
-
-def resolve_in_workspace(workspace: Path, rel: Any) -> Path | None:
-    """Resolve ``rel`` under ``workspace``; None if it is not a safe relative path inside it."""
-    if not isinstance(rel, str) or not rel or Path(rel).is_absolute() or "\x00" in rel:
-        return None
-    root = workspace.resolve()
-    target = (root / rel).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError:
-        return None
-    return target
 
 
 class FileSha256Verifier:
     """Re-observes a workspace file. observed_value: {"path": str, optional "sha256"/"exists"}."""
 
     verifier_id = "file_sha256"
+    reobserves = True
 
     def verify(self, item, ctx):
         ov = item.observed_value
@@ -236,9 +253,16 @@ class FileSha256Verifier:
 
 class JsonSchemaVerifier:
     """Re-validates a workspace JSON file against a workspace JSON Schema.
-    observed_value: {"path", "schema_path", optional claimed "valid"}."""
+    observed_value: {"path", "schema_path", optional claimed "valid"}.
+
+    Schemas are applied through :mod:`phi_core.safeschema` (no network, no
+    ``file://``, no reads outside the workspace). The observation carries
+    ``schema_closure``: the SHA-256 of every schema document actually loaded,
+    which the ``schema_compatible`` predicate compares with the hashes frozen
+    in the contract."""
 
     verifier_id = "json_schema"
+    reobserves = True
 
     def verify(self, item, ctx):
         ov = item.observed_value
@@ -247,32 +271,35 @@ class JsonSchemaVerifier:
         if ctx.workspace is None:
             return _result(item, VStatus.UNVERIFIABLE, "NO_WORKSPACE")
         target = resolve_in_workspace(ctx.workspace, ov["path"])
-        schema_path = resolve_in_workspace(ctx.workspace, ov["schema_path"])
-        if target is None or schema_path is None:
+        if target is None or resolve_in_workspace(ctx.workspace, ov["schema_path"]) is None:
             return _result(item, VStatus.REJECTED, "PATH_OUTSIDE_WORKSPACE")
         base = {"path": ov["path"], "schema_path": ov["schema_path"]}
-        if not schema_path.is_file():
-            return _result(item, VStatus.UNVERIFIABLE, "SCHEMA_FILE_MISSING")
-        try:
-            schema = json.loads(schema_path.read_text(encoding="utf-8"))
-            Draft202012Validator.check_schema(schema)
-        except (ValueError, Exception):  # noqa: BLE001 - any schema problem is unverifiable
-            return _result(item, VStatus.UNVERIFIABLE, "SCHEMA_FILE_INVALID")
         if not target.is_file():
+            check = check_document(ctx.workspace, ov["schema_path"], None)
+            if check.code is not None:
+                return _result(item, VStatus.UNVERIFIABLE, check.code)
             if ov.get("valid") is True:
                 return _result(item, VStatus.REJECTED, "CLAIM_CONTRADICTS_OBSERVATION")
-            return _result(item, VStatus.VERIFIED, observed={**base, "exists": False, "valid": False})
+            return _result(item, VStatus.VERIFIED, observed={
+                **base, "exists": False, "valid": False, "schema_closure": dict(check.closure)})
         actual_hash = sha256_file(target)
         if item.artifact_hash is not None and item.artifact_hash != actual_hash:
             return _result(item, VStatus.REJECTED, "ARTIFACT_HASH_MISMATCH")
         try:
             doc = json.loads(target.read_text(encoding="utf-8"))
-            valid = not any(True for _ in Draft202012Validator(schema).iter_errors(doc))
         except ValueError:
+            check = check_document(ctx.workspace, ov["schema_path"], None)
             valid = False
+        else:
+            check = check_document(ctx.workspace, ov["schema_path"], doc)
+            valid = bool(check.valid)
+        if check.code is not None:
+            return _result(item, VStatus.UNVERIFIABLE, check.code)
         if "valid" in ov and ov["valid"] is not valid:
             return _result(item, VStatus.REJECTED, "CLAIM_CONTRADICTS_OBSERVATION")
-        return _result(item, VStatus.VERIFIED, observed={**base, "exists": True, "valid": valid, "sha256": actual_hash})
+        return _result(item, VStatus.VERIFIED, observed={
+            **base, "exists": True, "valid": valid, "sha256": actual_hash,
+            "schema_closure": dict(check.closure)})
 
 
 class HmacAttestationVerifier:
@@ -289,6 +316,8 @@ class HmacAttestationVerifier:
         key = ctx.trust_store.keys.get(key_id)
         if key is None:
             return _result(item, VStatus.UNVERIFIABLE, "UNKNOWN_SIGNING_KEY")
+        if PURPOSE_EVIDENCE not in key.purposes:
+            return _result(item, VStatus.REJECTED, "KEY_NOT_AUTHORIZED_FOR_EVIDENCE")
         if item.source not in key.sources:
             return _result(item, VStatus.REJECTED, "SOURCE_NOT_AUTHORIZED_FOR_KEY")
         expected = hmac_hex(key.secret, signing_payload(item.to_dict()))
@@ -401,13 +430,17 @@ def verify_evidence(raw_items: Any, ctx: VerificationContext,
 
 
 def observe_files(contract: Mapping[str, Any], workspace: str | Path, now: str,
-                  source: str = "local-observer") -> list[dict[str, Any]]:
+                  source: str = "local-observer", checkpoint: str | None = None) -> list[dict[str, Any]]:
     """Host-side collector: produce file/schema evidence claims for a v1.0 contract's
     file constraints by observing ``workspace`` at time ``now``. The verifier will
-    re-observe; these claims carry no trust of their own."""
+    re-observe; these claims carry no trust of their own. Each claim is bound to
+    the contract's task (and to ``checkpoint`` when given)."""
     from .contracts import compile_constraints
 
     ws = Path(workspace)
+    binding: dict[str, Any] = {"task_id": contract["task_id"]}
+    if checkpoint is not None:
+        binding["checkpoints"] = [checkpoint]
     items = []
     for c in compile_constraints(contract):
         if c.predicate_type in ("input_exists", "output_exists", "file_hash"):
@@ -424,6 +457,7 @@ def observe_files(contract: Mapping[str, Any], workspace: str | Path, now: str,
                 "timestamp": now,
                 "artifact_hash": digest,
                 "provenance": {"collector": "phi_core.evidence.observe_files"},
+                "binding": dict(binding),
             })
         elif c.predicate_type == "schema_compatible":
             items.append({
@@ -436,6 +470,7 @@ def observe_files(contract: Mapping[str, Any], workspace: str | Path, now: str,
                 "timestamp": now,
                 "artifact_hash": None,
                 "provenance": {"collector": "phi_core.evidence.observe_files"},
+                "binding": dict(binding),
             })
     return items
 
@@ -443,11 +478,18 @@ def observe_files(contract: Mapping[str, Any], workspace: str | Path, now: str,
 def make_evidence(evidence_id: str, constraint_id: str, *, source: str, verifier_id: str,
                   observed_value: Any, timestamp: datetime | str, artifact_hash: str | None = None,
                   provenance: Mapping[str, Any] | None = None,
-                  verification_status: str = "CLAIMED") -> dict[str, Any]:
+                  verification_status: str = "CLAIMED",
+                  binding: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    """``binding`` (signed with the rest of the item) scopes where the claim may be
+    used: ``task_id`` / ``contract_hash`` / ``checkpoints`` for Phi,
+    ``baseline_id`` / ``baseline_revision`` / ``requirement_id`` for Acceptance."""
     ts = timestamp if isinstance(timestamp, str) else format_time(timestamp)
-    return {
+    out = {
         "evidence_id": evidence_id, "constraint_id": constraint_id, "source": source,
         "verifier_id": verifier_id, "observed_value": observed_value,
         "verification_status": verification_status, "timestamp": ts,
         "artifact_hash": artifact_hash, "provenance": dict(provenance or {}),
     }
+    if binding is not None:
+        out["binding"] = copy.deepcopy(dict(binding))
+    return out

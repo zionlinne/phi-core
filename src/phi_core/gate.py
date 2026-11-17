@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import inspect
 import os
 import threading
 from abc import ABC, abstractmethod
@@ -73,6 +74,24 @@ def _resolve(value: Any) -> Any:
     return value() if callable(value) else value
 
 
+def _takes_checkpoint(fn: Callable[..., Any]) -> bool:
+    try:
+        params = inspect.signature(fn).parameters.values()
+    except (TypeError, ValueError):
+        return False
+    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty
+               or p.kind is p.VAR_POSITIONAL for p in params)
+
+
+def _resolve_evidence(evidence: Any, checkpoint: str) -> Any:
+    """Evidence for one checkpoint. A provider that takes a positional argument is
+    called with the checkpoint being evaluated (so PLAN, DISPATCH, STEP and COMMIT
+    each get their own latest evidence); a zero-argument provider is called as is."""
+    if not callable(evidence):
+        return evidence
+    return evidence(checkpoint) if _takes_checkpoint(evidence) else evidence()
+
+
 class PhiGate:
     def __init__(self, engine: PhiEngine | None = None, *, workspace: str | Path | None = None,
                  trust_store=None, audit_log=None, secret: bytes | None = None):
@@ -96,7 +115,7 @@ class PhiGate:
     def check(self, checkpoint: str, contract: Any, state: Any, evidence: Any) -> Decision:
         if checkpoint not in CHECKPOINTS:
             raise ValueError(f"unknown checkpoint {checkpoint!r}")
-        contract, state, evidence = _resolve(contract), _resolve(state), _resolve(evidence)
+        contract, state, evidence = _resolve(contract), _resolve(state), _resolve_evidence(evidence, checkpoint)
         result = self.engine.evaluate(contract, state, evidence, checkpoint=checkpoint,
                                       workspace=self.workspace, trust_store=self.trust_store)
         record_hash = None
@@ -270,7 +289,7 @@ class GatedRunner:
             report.stopped_at = label
 
         try:
-            session.preflight(a.observe_state, lambda: a.collect_evidence("DISPATCH"), action=lambda: None)
+            session.preflight(a.observe_state, a.collect_evidence, action=lambda: None)
             for d in session.decisions:
                 summarize(d, "preflight")
         except GateDenied as denied:
@@ -280,7 +299,7 @@ class GatedRunner:
             return report
         for step in a.plan_steps():
             try:
-                decision, _ = session.step(a.observe_state, lambda: a.collect_evidence("STEP"), action=step.run)
+                decision, _ = session.step(a.observe_state, a.collect_evidence, action=step.run)
             except GateDenied as denied:
                 summarize(denied.decision, f"step:{step.name}")
                 stop(denied, f"step:{step.name}")
@@ -288,7 +307,7 @@ class GatedRunner:
             summarize(decision, f"step:{step.name}")
             report.executed_steps.append(step.name)
         try:
-            decision, _ = session.commit(a.observe_state, lambda: a.collect_evidence("COMMIT"), action=a.commit)
+            decision, _ = session.commit(a.observe_state, a.collect_evidence, action=a.commit)
         except GateDenied as denied:
             summarize(denied.decision, "commit")
             stop(denied, "commit")

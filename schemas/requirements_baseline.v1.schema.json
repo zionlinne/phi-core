@@ -44,6 +44,7 @@
     }
   },
   "$defs": {
+    "sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
     "relpath": {
       "type": "string",
       "minLength": 1,
@@ -73,7 +74,19 @@
                 "method": { "const": "command" },
                 "argv": { "type": "array", "minItems": 1, "items": { "type": "string" } },
                 "timeout_seconds": { "type": "number", "exclusiveMinimum": 0 },
-                "expected_exit_code": { "type": "integer" }
+                "expected_exit_code": { "type": "integer" },
+                "pinned_files": {
+                  "description": "Workspace files that are part of the acceptance criterion (scripts, configs, fixtures). Their bytes are frozen here and checked before and after the run.",
+                  "type": "array",
+                  "items": {
+                    "type": "object", "additionalProperties": false, "required": ["path", "sha256"],
+                    "properties": { "path": { "$ref": "#/$defs/relpath" }, "sha256": { "$ref": "#/$defs/sha256" } }
+                  }
+                },
+                "artifacts": {
+                  "description": "Delivered workspace paths the command examines. They are what is being tested, so they are not pinned.",
+                  "type": "array", "items": { "$ref": "#/$defs/relpath" }, "uniqueItems": true
+                }
               }
             },
             {
@@ -81,7 +94,13 @@
               "properties": {
                 "method": { "const": "json_schema" },
                 "path": { "$ref": "#/$defs/relpath" },
-                "schema_path": { "$ref": "#/$defs/relpath" }
+                "schema_path": { "$ref": "#/$defs/relpath" },
+                "schema_sha256": { "$ref": "#/$defs/sha256" },
+                "schema_refs": {
+                  "type": "object",
+                  "propertyNames": { "$ref": "#/$defs/relpath" },
+                  "additionalProperties": { "$ref": "#/$defs/sha256" }
+                }
               }
             },
             {

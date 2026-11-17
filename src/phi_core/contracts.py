@@ -172,7 +172,12 @@ def compile_constraints(contract: Mapping[str, Any]) -> list[CompiledConstraint]
             add(f"output:{path}:sha256", "file_hash", {"path": path, "sha256": outp["sha256"]}, ("COMMIT",),
                 "outputs", f"output {path} integrity")
         if "schema" in outp:
-            add(f"output:{path}:schema", "schema_compatible", {"path": path, "schema_path": outp["schema"]},
+            params = {"path": path, "schema_path": outp["schema"]}
+            if "schema_sha256" in outp:
+                params["schema_sha256"] = outp["schema_sha256"]
+            if "schema_refs" in outp:
+                params["schema_refs"] = copy.deepcopy(outp["schema_refs"])
+            add(f"output:{path}:schema", "schema_compatible", params,
                 ("COMMIT",), "outputs", f"output {path} matches {outp['schema']}")
     for cap in contract.get("capabilities", []):
         add(f"capability:{cap}", "capability", {"name": cap}, ("PLAN", "DISPATCH"), "capabilities")
@@ -218,6 +223,9 @@ def semantic_errors(contract: Mapping[str, Any]) -> list[str]:
         paths = [x["path"] for x in contract.get(key, [])]
         if len(paths) != len(set(paths)):
             errors.append(f"{key}: duplicate path")
+    for outp in contract.get("outputs", []):
+        if "schema" not in outp and ("schema_sha256" in outp or "schema_refs" in outp):
+            errors.append(f"outputs: {outp['path']} pins a schema hash without a schema path")
     names = [r["name"] for r in contract.get("resources", [])]
     if len(names) != len(set(names)):
         errors.append("resources: duplicate name")

@@ -55,7 +55,7 @@ from .predicates import (
 )
 from .schemas import schema_errors
 
-EVALUATOR_VERSION = "phi-core/1.0.0"
+EVALUATOR_VERSION = "phi-core/1.0.1"
 DEFAULT_MAX_AGE_SECONDS = 3600
 
 
@@ -197,6 +197,27 @@ def _sorted_unique(codes) -> tuple[str, ...]:
     return tuple(sorted(set(codes)))
 
 
+def _binding_problem(binding: Any, context, reobserved: bool = False) -> str | None:
+    """Evidence is usable only for the task (and, when stated, the contract hash
+    and checkpoints) it is bound to. Cross-task use is rejected by default.
+
+    Unbound evidence is tolerated only when ``reobserved``: its verifier recomputed
+    the value from this evaluation's workspace, so nothing is carried over from
+    another task. Claims (attestations, custom verifiers) must be bound."""
+    task_id, c_hash, checkpoint = context
+    if binding is None and reobserved:
+        return None
+    if not isinstance(binding, Mapping) or "task_id" not in binding:
+        return "EVIDENCE_NOT_BOUND_TO_TASK"
+    if binding["task_id"] != task_id:
+        return "EVIDENCE_BOUND_TO_OTHER_TASK"
+    if "contract_hash" in binding and binding["contract_hash"] != c_hash:
+        return "EVIDENCE_BOUND_TO_OTHER_CONTRACT"
+    if "checkpoints" in binding and checkpoint not in binding["checkpoints"]:
+        return "EVIDENCE_NOT_BOUND_TO_CHECKPOINT"
+    return None
+
+
 class PhiEngine:
     def __init__(self, predicates: PredicateRegistry | None = None,
                  verifiers: VerifierRegistry | None = None,
@@ -286,7 +307,8 @@ class PhiEngine:
         for c in compiled:
             if checkpoint not in c.checkpoints:
                 continue
-            res = self._eval_constraint(c, frozen_state, by_constraint.get(c.constraint_id, []), now, policy)
+            res = self._eval_constraint(c, frozen_state, by_constraint.get(c.constraint_id, []), now, policy,
+                                        (task_id, c_hash, checkpoint))
             (hard if c.kind == "hard" else soft).append(res)
 
         violated = [r for r in hard if r.status is Status.VIOLATED]
@@ -305,9 +327,11 @@ class PhiEngine:
             reasons.append("NO_APPLICABLE_HARD_CONSTRAINTS_SCOPE_DECLARED_COMPLETE")
         return finish(Verdict.TRUE, reasons, hard, soft, missing, unmatched)
 
-    def _eval_constraint(self, c: CompiledConstraint, state, candidates, now, policy) -> ConstraintResult:
+    def _eval_constraint(self, c: CompiledConstraint, state, candidates, now, policy,
+                         context=(None, None, None)) -> ConstraintResult:
         """``state`` is a read-only frozen view; ``candidates`` are the verifier results
-        whose constraint_id equals this constraint's id."""
+        whose constraint_id equals this constraint's id; ``context`` is
+        (task_id, contract_hash, checkpoint) that evidence bindings must match."""
         def mk(outcome: Outcome, refs=()):
             return ConstraintResult(
                 constraint_id=c.constraint_id, kind=c.kind, predicate_type=c.predicate_type,
@@ -342,6 +366,11 @@ class PhiEngine:
                 continue
             if r.verifier_id not in allowed:
                 ignored.add("EVIDENCE_VERIFIER_NOT_ALLOWED")
+                continue
+            verifier = self.verifiers.get(r.verifier_id)
+            binding_code = _binding_problem(r.binding, context, getattr(verifier, "reobserves", False) is True)
+            if binding_code is not None:
+                ignored.add(binding_code)
                 continue
             try:
                 ts = parse_time(r.timestamp)

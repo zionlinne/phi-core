@@ -8,6 +8,7 @@ from importlib import resources
 from pathlib import Path
 from typing import Any
 
+import referencing
 from jsonschema import Draft202012Validator
 
 SCHEMA_FILES = {
@@ -40,7 +41,8 @@ def load_schema_file(filename: str) -> dict[str, Any]:
 
 @lru_cache(maxsize=None)
 def validator_for(kind: str) -> Draft202012Validator:
-    return Draft202012Validator(load_schema_file(SCHEMA_FILES[kind]))
+    # An empty registry: packaged schemas use only internal references; nothing is retrieved.
+    return Draft202012Validator(load_schema_file(SCHEMA_FILES[kind]), registry=referencing.Registry())
 
 
 def schema_errors(kind: str, data: Any) -> list[str]:
