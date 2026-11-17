@@ -588,6 +588,57 @@ def test_n4_snapshot_is_outside_workspace_and_removed(ws):
     assert after <= before
 
 
+SHADOW_CHECK = "import json,sys\nsys.exit(0 if json.loads('{\"n\": 1}')['n'] == 1 else 1)\n"
+FAKE = "import sys\nloads = lambda s: {'n': 1}\n"
+
+
+@pytest.mark.parametrize("layout", [
+    {"json.py": FAKE},
+    {"json/__init__.py": FAKE},
+    {"jsonschema.py": FAKE},
+], ids=["stdlib-module", "stdlib-package", "installed-module"])
+def test_n1_regression_unpinned_workspace_module_shadowing_trusted_import(ws, layout):
+    write(ws, "check.py", SHADOW_CHECK)
+    for rel, text in layout.items():
+        write(ws, rel, text)
+    rep = accept(ws, cmd_req(["{python}", "check.py"], pinned_files=pin(ws, "check.py"), artifacts=["."]))
+    r = rep["requirement_results"][0]
+    assert (r["status"], r["reason_codes"]) == ("INCONCLUSIVE", ["COMMAND_WORKSPACE_SHADOWS_MODULE"])
+    assert set(layout) <= set(r["detail"]["shadowing_not_pinned"])
+    rep = accept(ws, cmd_req(["{python}", "-c", "import json"], artifacts=["."]))
+    assert req_status(rep, "R1") == ("INCONCLUSIVE", ["COMMAND_WORKSPACE_SHADOWS_MODULE"])
+
+
+def test_n1_control_shadowing_rules(ws):
+    write(ws, "check.py", SHADOW_CHECK)
+    write(ws, "json/readme.txt", "namespace dir, not a package")
+    assert accept(ws, cmd_req(["{python}", "check.py"], pinned_files=pin(ws, "check.py")))["status"] == "PASS"
+    write(ws, "json.py", "import sys\nloads = lambda s: {'n': 1}\n")
+    assert accept(ws, cmd_req(["{python}", "-I", "check.py"], pinned_files=pin(ws, "check.py")))["status"] == "PASS"
+    rep = accept(ws, cmd_req(["{python}", "check.py"], pinned_files=pin(ws, "check.py", "json.py")))
+    assert rep["status"] == "PASS"
+
+
+def test_n1_regression_file_added_between_check_and_snapshot(ws, monkeypatch, tmp_path):
+    """A producer creates an undeclared data file after the live-workspace role
+    check and before the snapshot copy: the snapshot re-check refuses it."""
+    from phi_core import command
+
+    marker = tmp_path / "ran"
+    write(ws, "check.py", marking(marker))
+    real_copy = command._copy_workspace
+
+    def racing_copy(paths, snap, copied):
+        write(ws, "in.txt", "late")
+        return real_copy(paths, snap, copied)
+
+    monkeypatch.setattr(command, "_copy_workspace", racing_copy)
+    rep = accept(ws, cmd_req(["{python}", "check.py", "in.txt"], pinned_files=pin(ws, "check.py")))
+    r = rep["requirement_results"][0]
+    assert (r["status"], r["reason_codes"]) == ("INCONCLUSIVE", ["COMMAND_WORKSPACE_FILE_NOT_PINNED"])
+    assert r["detail"]["changed_while_snapshotting"] is True and not marker.exists()
+
+
 # =========================================================================== property and concurrency
 
 

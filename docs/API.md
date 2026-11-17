@@ -162,6 +162,7 @@ trust JSON 中 `"purposes": ["baseline-anchor"]`）。用途缺省为 `["evidenc
 | --- | --- | --- | --- |
 | 程序与数据分角色 | `artifacts` 覆盖到的任何 argv 文件都免冻结，包括被执行的脚本本身 | 工作区内被执行的程序（`{python}` 脚本/目录、`-m` 可加载的模块文件及其包 `__init__`/`__main__`、无扩展名或已编译模块、工作区内的 `argv[0]`）必须在 `pinned_files` 中，`artifacts` 不豁免；`artifacts` 只豁免 `{python}` 程序的数据参数；非 `{python}` 程序的 argv 中所有工作区文件都必须冻结 | 把检查脚本/模块列入 `pinned_files`；非 Python 工具的被检数据改由冻结的 `{python}` 包装脚本读取 |
 | 路径失败即关闭 | 解析到工作区外的符号链接被当作非工作区参数放行 | argv/`-m`/`--opt=` 中经符号链接或目录链接解析到工作区外、悬空或循环的链接、相对 `..` 逃逸 → INCONCLUSIVE `COMMAND_PATH_ESCAPES_WORKSPACE`；指向工作区的绝对路径（含工作区外指回来的别名、逐级解析时经过工作区的宿主路径）→ INCONCLUSIVE `COMMAND_ABSOLUTE_WORKSPACE_PATH`；不读取外部目标内容 | 在 argv 中使用工作区相对路径 |
+| 快照复核与模块遮蔽 | 无 | 角色在快照上复核（复制期间新增 → `COMMAND_WORKSPACE_FILE_NOT_PINNED`，`changed_while_snapshotting`）；`sys.path` 首目录中未冻结且遮蔽标准库/已安装模块的文件或包 → INCONCLUSIVE `COMMAND_WORKSPACE_SHADOWS_MODULE`（`-I`/`-P` 时不检查） | 冻结确需提供的同名模块，或用 `-I` 运行 |
 | PATH | 宿主 PATH 原样传入 | 删除空项、相对项以及位于工作区内的项；裸程序名在清理后的 PATH 上解析为绝对路径，解析到工作区内 → INCONCLUSIVE `COMMAND_PROGRAM_IN_WORKSPACE`；解释器在工作区内 → `COMMAND_INTERPRETER_IN_WORKSPACE` | 无 |
 | 执行位置 | cwd = 工作区，运行前后比较 hash | cwd = 工作区外的私有快照（0700 临时目录）：工作区副本（不含 `__pycache__`、不含离开工作区的链接）+ 已核对的标准字节；运行后核对快照与工作区；命令新建或修改的非标准文件不跟随链接地写回工作区；stdin 为空 | 依赖在工作区写文件的检查器无需改动；依赖从工作区读取被排除内容（`__pycache__`、外链）的检查器需调整 |
 | provider 检查点 | 只看必需位置参数个数，`checkpoint="DISPATCH"` 之类的默认参数永远拿到默认值 | 见上文 provider 签名表；签名不可判定 → `EvidenceProviderError` | 无需改动 |

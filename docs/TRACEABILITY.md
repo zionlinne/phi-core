@@ -148,7 +148,7 @@ Schema、为验收权威密钥加 `baseline-anchor` 用途；`tests/test_accepta
 
 | 缺陷 | 修复 | 代码 | 测试 |
 | --- | --- | --- | --- |
-| N1 COMMAND-ARTIFACT-EXEMPTS-CRITERION | 程序/数据分角色：工作区程序（脚本/目录程序、`-m` 可加载的每个文件、工作区 `argv[0]`）必须冻结，`artifacts` 只豁免 `{python}` 程序的数据参数；非 `{python}` 程序 argv 中的工作区文件全部必须冻结 | `command._plan_python`、`_module_candidates`、`_plan_external`、`_run` | `test_n1_*`（14 种别名 × 回归与正例）、`test_property_unpinned_or_escaping_program_never_passes` |
+| N1 COMMAND-ARTIFACT-EXEMPTS-CRITERION | 程序/数据分角色：工作区程序（脚本/目录程序、`-m` 可加载的每个文件、工作区 `argv[0]`）必须冻结，`artifacts` 只豁免 `{python}` 程序的数据参数；非 `{python}` 程序 argv 中的工作区文件全部必须冻结；角色在快照上复核；遮蔽受信任模块的未冻结工作区模块拒绝 | `command._plan_python`、`_module_candidates`、`_plan_external`、`_role_problem`、`_shadowing`、`_run` | `test_n1_*`（14 种别名 × 回归与正例、模块遮蔽、复制窗口竞态）、`test_property_unpinned_or_escaping_program_never_passes` |
 | N2 COMMAND-SYMLINK-SKIPS-UNPINNED-GUARD | 路径先字面检查再严格解析；逃逸、悬空、循环、`..`、绝对别名、逐级解析经过工作区的宿主路径 → INCONCLUSIVE；`O_NOFOLLOW` 读取；PATH 清理；解释器/程序在工作区内拒绝；无关外链不跟随不复制 | `command._Paths`、`_visited`、`_read_nofollow`、`_clean_path`、`_copy_workspace` | `test_n2_*`（含外部 FIFO 证明未读取） |
 | N3 RUNNER-DEFAULTED-CHECKPOINT-IGNORED | provider 只要能接收检查点就收到：任一位置参数（含默认值）、`*args`、kw-only `checkpoint`、`**kwargs`；零参兼容；签名不可判定或只有其他 kw-only 参数 → `EvidenceProviderError`；provider 异常传播 | `gate._checkpoint_call`、`_resolve_evidence` | `test_n3_*`（9 种签名 × 每阶段取证 × 四个检查点各自 FALSE） |
 | N4 COMMAND-PIN-RESTORE-DURING-RUN | 命令在工作区外私有快照中运行，标准文件写入已核对的内存字节；运行后核对快照与工作区；输出不跟随链接写回 | `command._run`、`_write_back` | `test_n4_*`（确定性竞态：改—读—还原 → FAIL；正确产物 → PASS） |

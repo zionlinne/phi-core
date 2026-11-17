@@ -35,7 +35,9 @@ process running under the same OS account is out of scope.
 
 from __future__ import annotations
 
+import importlib.machinery
 import os
+import pkgutil
 import shutil
 import stat
 import subprocess
@@ -160,6 +162,7 @@ class _Plan:
     program: list[str] = field(default_factory=list)
     data: list[str] = field(default_factory=list)
     strict: bool = False
+    path0: str | None = None  # workspace dir Python puts first on sys.path
 
 
 def _files_under(real: Path) -> list[Path]:
@@ -204,7 +207,7 @@ def _plan_python(argv: list[str], paths: _Paths) -> _Plan:
     plan = _Plan(argv=argv)
     i, n = 1, len(argv)
     script = module = None
-    inline = False
+    inline = safe_path = False
     while i < n:
         t = argv[i]
         if t == "--":
@@ -221,6 +224,8 @@ def _plan_python(argv: list[str], paths: _Paths) -> _Plan:
             j, consumed_next = 1, False
             while j < len(t):
                 ch = t[j]
+                if ch in "IP":
+                    safe_path = True
                 if ch in _PY_OPTS_WITH_VALUE:
                     val = t[j + 1:]
                     if not val:
@@ -244,6 +249,11 @@ def _plan_python(argv: list[str], paths: _Paths) -> _Plan:
         real = paths.token(script)
         if real is not None:
             plan.program += [paths.rel(f) for f in _files_under(real)]
+            if not safe_path:
+                plan.path0 = paths.rel(real if real.is_dir() else real.parent)
+    else:
+        if not safe_path:
+            plan.path0 = "."
     if module is not None:
         plan.program += _module_candidates(paths, module)
     for tok in argv[i:]:
@@ -254,6 +264,43 @@ def _plan_python(argv: list[str], paths: _Paths) -> _Plan:
             if real is not None:
                 plan.data += [paths.rel(f) for f in _files_under(real)]
     return plan
+
+
+def _trusted_module_names(exclude: list[Path]) -> set[str]:
+    """Top-level modules the checker would otherwise import from the standard
+    library or the interpreter's installed packages."""
+    names = set(sys.builtin_module_names) | set(getattr(sys, "stdlib_module_names", ()))
+    for entry in sys.path:
+        if not entry:
+            continue
+        try:
+            real = Path(entry).resolve()
+        except (OSError, RuntimeError):
+            continue
+        if any(_inside(x, real) or _inside(real, x) for x in exclude) or not real.is_dir():
+            continue
+        names.update(m.name for m in pkgutil.iter_modules([str(real)]))
+    return names
+
+
+def _shadowing(snap: Path, path0: str, trusted: set[str]) -> list[str]:
+    """Workspace files in the first ``sys.path`` directory that would be imported
+    in place of a trusted module (module files, compiled modules, packages)."""
+    base = snap / path0
+    suffixes = sorted(importlib.machinery.all_suffixes(), key=len, reverse=True)
+    found = []
+    for entry in sorted(os.listdir(base)):
+        full = base / entry
+        if full.is_file():
+            name = next((entry[:-len(x)] for x in suffixes if entry.endswith(x)), None)
+            if name in trusted:
+                found.append(full.relative_to(snap).as_posix())
+        elif full.is_dir() and entry in trusted:
+            for inner in sorted(os.listdir(full)):
+                if inner.split(".", 1)[0] == "__init__" and (full / inner).is_file():
+                    found += [f.relative_to(snap).as_posix() for f in _files_under(full)]
+                    break
+    return found
 
 
 def _clean_path(path_value: str, paths: _Paths) -> str:
@@ -468,6 +515,21 @@ def _tail(text: str, n: int = 2000) -> str:
     return text[-n:] if text else ""
 
 
+def _role_problem(plan: _Plan, pinned, artifacts: list[str]):
+    program_unpinned = sorted({p for p in plan.program if p not in pinned})
+    data_unpinned = sorted({d for d in plan.data if d not in pinned
+                            and (plan.strict or not _covered(d, artifacts))})
+    if not program_unpinned and not data_unpinned:
+        return None
+    return "INCONCLUSIVE", ["COMMAND_WORKSPACE_FILE_NOT_PINNED"], {
+        "unpinned": sorted(set(program_unpinned) | set(data_unpinned))[:50],
+        "program_not_pinned": program_unpinned[:50],
+        "data_not_pinned_or_declared": data_unpinned[:50],
+        "artifacts_waive_data_only": True,
+        "argv_roles": "unparsed-program-all-pinned" if plan.strict else "python",
+    }
+
+
 def run_command(spec: Mapping[str, Any], workspace: Path, command_env: Mapping[str, str] | None):
     """Return ``(status, reason_codes, detail)`` for one command requirement."""
     try:
@@ -492,18 +554,9 @@ def _run(spec, workspace: Path, command_env):
         argv = [sys.executable if a == "{python}" else a for a in argv]
         plan = _plan_external(argv, paths, env["PATH"])
 
-    artifacts = _artifact_roots(spec, paths)
-    program_unpinned = sorted({p for p in plan.program if p not in pinned})
-    data_unpinned = sorted({d for d in plan.data if d not in pinned
-                            and (plan.strict or not _covered(d, artifacts))})
-    if program_unpinned or data_unpinned:
-        return "INCONCLUSIVE", ["COMMAND_WORKSPACE_FILE_NOT_PINNED"], {
-            "unpinned": sorted(set(program_unpinned) | set(data_unpinned))[:50],
-            "program_not_pinned": program_unpinned[:50],
-            "data_not_pinned_or_declared": data_unpinned[:50],
-            "artifacts_waive_data_only": True,
-            "argv_roles": "unparsed-program-all-pinned" if plan.strict else "python",
-        }
+    refused = _role_problem(plan, pinned, _artifact_roots(spec, paths))
+    if refused is not None:
+        return refused
 
     snap = _make_snapshot_dir(paths)
     try:
@@ -515,6 +568,18 @@ def _run(spec, workspace: Path, command_env):
                 dest.unlink()
             dest.parent.mkdir(parents=True, exist_ok=True)
             _write_file(dest, data, mode)
+        # Roles are checked again on the private snapshot: the bytes that run.
+        spaths = _Paths(snap, snap)
+        splan = _plan_python(plan.argv, spaths) if not plan.strict else _plan_external(plan.argv, spaths, env["PATH"])
+        refused = _role_problem(splan, pinned, _artifact_roots(spec, spaths))
+        if refused is not None:
+            refused[2]["changed_while_snapshotting"] = True
+            return refused
+        if splan.path0 is not None:
+            shadows = [x for x in _shadowing(snap, splan.path0, _trusted_module_names([paths.root, snap]))
+                       if x not in pinned]
+            if shadows:
+                return "INCONCLUSIVE", ["COMMAND_WORKSPACE_SHADOWS_MODULE"], {"shadowing_not_pinned": shadows[:50]}
         try:
             proc = subprocess.run(plan.argv, cwd=snap, capture_output=True, text=True, shell=False,
                                   stdin=subprocess.DEVNULL, timeout=spec.get("timeout_seconds", 120), env=env)
