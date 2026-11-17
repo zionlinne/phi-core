@@ -10,7 +10,10 @@
     "verification_status": "CLAIMED",
     "timestamp": "2026-11-16T23:55:00Z",
     "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
-    "provenance": {}
+    "provenance": {},
+    "binding": {
+      "task_id": "build-report"
+    }
   },
   {
     "evidence_id": "ev-input:data/input.csv:sha256",
@@ -23,7 +26,10 @@
     "verification_status": "CLAIMED",
     "timestamp": "2026-11-16T23:55:00Z",
     "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
-    "provenance": {}
+    "provenance": {},
+    "binding": {
+      "task_id": "build-report"
+    }
   },
   {
     "evidence_id": "ev-output:report/summary.json:exists",
@@ -36,7 +42,10 @@
     "verification_status": "CLAIMED",
     "timestamp": "2026-11-16T23:55:00Z",
     "artifact_hash": "479510595767f53fa920e088f69f48e831425716e7260d4c9ca6d75fbdba08aa",
-    "provenance": {}
+    "provenance": {},
+    "binding": {
+      "task_id": "build-report"
+    }
   },
   {
     "evidence_id": "ev-schema",
@@ -50,7 +59,10 @@
     "verification_status": "CLAIMED",
     "timestamp": "2026-11-16T23:55:00Z",
     "artifact_hash": null,
-    "provenance": {}
+    "provenance": {},
+    "binding": {
+      "task_id": "build-report"
+    }
   },
   {
     "evidence_id": "ev-tests",
@@ -66,7 +78,13 @@
     "provenance": {
       "run": "example-ci-1",
       "key_id": "ci-demo-key",
-      "signature": "f5c0c2a5c206faccae9152d27f6e944069ff2a7fd1f2c0b6e6523b62c85763c0"
+      "signature": "a438667cb0af240eed00ad26175bf352218ea8acf031e3f9463cb6273c2fb25e"
+    },
+    "binding": {
+      "task_id": "build-report",
+      "checkpoints": [
+        "COMMIT"
+      ]
     }
   }
 ]

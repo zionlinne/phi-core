@@ -19,7 +19,8 @@
     "outputs": [
       {
         "path": "report/summary.json",
-        "schema": "schemas/summary.schema.json"
+        "schema": "schemas/summary.schema.json",
+        "schema_sha256": "1d6cb32b4b79eb3ead4da22ac00375548a0b64b493f5f7f5ac3c953a275052bd"
       }
     ],
     "capabilities": [
@@ -84,7 +85,7 @@
       "baseline_revision": 1
     },
     "integrity": {
-      "contract_hash": "93bfde64103fdd7efc03c46864ea0c6e965f45ea7f5190b1de1ed71cbabe0e49"
+      "contract_hash": "334711f3200ff0c45e3724fa7c253c5daf1f534da9e98d026c02bf817a850286"
     }
   },
   "state": {
@@ -124,7 +125,10 @@
       "verification_status": "CLAIMED",
       "timestamp": "2026-11-16T23:55:00Z",
       "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
-      "provenance": {}
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
     },
     {
       "evidence_id": "ev-input:data/input.csv:sha256",
@@ -137,7 +141,10 @@
       "verification_status": "CLAIMED",
       "timestamp": "2026-11-16T23:55:00Z",
       "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
-      "provenance": {}
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
     },
     {
       "evidence_id": "ev-output:report/summary.json:exists",
@@ -150,7 +157,10 @@
       "verification_status": "CLAIMED",
       "timestamp": "2026-11-16T23:55:00Z",
       "artifact_hash": "479510595767f53fa920e088f69f48e831425716e7260d4c9ca6d75fbdba08aa",
-      "provenance": {}
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
     },
     {
       "evidence_id": "ev-schema",
@@ -164,7 +174,10 @@
       "verification_status": "CLAIMED",
       "timestamp": "2026-11-16T23:55:00Z",
       "artifact_hash": null,
-      "provenance": {}
+      "provenance": {},
+      "binding": {
+        "task_id": "build-report"
+      }
     },
     {
       "evidence_id": "ev-tests",
@@ -180,7 +193,13 @@
       "provenance": {
         "run": "example-ci-1",
         "key_id": "ci-demo-key",
-        "signature": "f5c0c2a5c206faccae9152d27f6e944069ff2a7fd1f2c0b6e6523b62c85763c0"
+        "signature": "a438667cb0af240eed00ad26175bf352218ea8acf031e3f9463cb6273c2fb25e"
+      },
+      "binding": {
+        "task_id": "build-report",
+        "checkpoints": [
+          "COMMIT"
+        ]
       }
     }
   ],

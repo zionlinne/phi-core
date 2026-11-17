@@ -27,7 +27,8 @@
       "verification": {
         "method": "json_schema",
         "path": "report/summary.json",
-        "schema_path": "schemas/summary.schema.json"
+        "schema_path": "schemas/summary.schema.json",
+        "schema_sha256": "1d6cb32b4b79eb3ead4da22ac00375548a0b64b493f5f7f5ac3c953a275052bd"
       }
     },
     {

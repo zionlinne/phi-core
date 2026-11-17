@@ -58,6 +58,7 @@ jobs:
           run bad_output 10
           run ownership_conflict 10
           run contract_edit_midrun 20
+          run schema_swap 10
           test -e "$RUNNER_TEMP/h-ok/output/count.json"
           test ! -e "$RUNNER_TEMP/h-tampered_input/output"
           test ! -e "$RUNNER_TEMP/h-dependency_pending/output"

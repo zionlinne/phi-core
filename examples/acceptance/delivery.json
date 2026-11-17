@@ -44,7 +44,11 @@
       "artifact_hash": null,
       "provenance": {
         "key_id": "ci-demo-key",
-        "signature": "1c12f0c7d236223267d2ef619edc726028cc2dfcae7b99b6327e78ee1c167167"
+        "signature": "22e50be8f4d18d251810e651409d8bce51dff9115af49cc5c70d29b755a3c7c2"
+      },
+      "binding": {
+        "baseline_id": "report-req",
+        "baseline_revision": 1
       }
     }
   ]

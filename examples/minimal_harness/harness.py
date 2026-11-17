@@ -10,7 +10,8 @@ Usage:
   python examples/minimal_harness/harness.py --workspace /tmp/demo --scenario ok
 
 Scenarios: ok, tampered_input, dependency_pending, bad_output,
-ownership_conflict, contract_edit_midrun.
+ownership_conflict, contract_edit_midrun, schema_swap (a released step replaces the
+frozen output schema with {} and writes a non-conforming output; COMMIT blocks).
 Exit code: 0 COMPLETED, 10 BLOCKED, 20 PAUSED.
 """
 
@@ -43,7 +44,8 @@ def setup_workspace(ws: Path, scenario: str, now: str) -> None:
     (ws / "schemas").mkdir()
     data = b"alpha\nbeta\ngamma\n"
     (ws / "input" / "data.txt").write_bytes(data)
-    (ws / "schemas" / "count.schema.json").write_text(json.dumps(COUNT_SCHEMA), encoding="utf-8")
+    schema_bytes = json.dumps(COUNT_SCHEMA).encode("utf-8")
+    (ws / "schemas" / "count.schema.json").write_bytes(schema_bytes)
     contract = {
         "contract_version": "1.0",
         "task_id": TASK,
@@ -52,7 +54,8 @@ def setup_workspace(ws: Path, scenario: str, now: str) -> None:
         "inputs": [{"path": "input/data.txt", "sha256": hashlib.sha256(data).hexdigest()}],
         "outputs": [
             {"path": "output/upper.txt"},
-            {"path": "output/count.json", "schema": "schemas/count.schema.json"},
+            {"path": "output/count.json", "schema": "schemas/count.schema.json",
+             "schema_sha256": hashlib.sha256(schema_bytes).hexdigest()},
         ],
         "capabilities": ["python3"],
         "time_bounds": {"deadline": "2026-12-31T00:00:00Z"},
@@ -92,7 +95,8 @@ class FilePipelineAdapter(HarnessAdapter):
         return json.loads((self.ws / "state.json").read_text(encoding="utf-8"))
 
     def collect_evidence(self, checkpoint: str) -> list:
-        return observe_files(self.load_contract(), self.ws, self.observe_state()["now"], source="demo-host")
+        return observe_files(self.load_contract(), self.ws, self.observe_state()["now"], source="demo-host",
+                             checkpoint=checkpoint)
 
     def plan_steps(self):
         return [Step("uppercase", self._uppercase), Step("count", self._count)]
@@ -108,7 +112,9 @@ class FilePipelineAdapter(HarnessAdapter):
 
     def _count(self):
         lines = (self.ws / "input" / "data.txt").read_text(encoding="utf-8").count("\n")
-        payload = {"lines": "many"} if self.scenario == "bad_output" else {"lines": lines}
+        payload = {"lines": "many"} if self.scenario in ("bad_output", "schema_swap") else {"lines": lines}
+        if self.scenario == "schema_swap":
+            (self.ws / "schemas" / "count.schema.json").write_text("{}", encoding="utf-8")
         (self.ws / "output" / "count.json").write_text(json.dumps(payload), encoding="utf-8")
 
     def commit(self):
@@ -121,7 +127,8 @@ def main(argv=None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--workspace", required=True)
     ap.add_argument("--scenario", default="ok", choices=[
-        "ok", "tampered_input", "dependency_pending", "bad_output", "ownership_conflict", "contract_edit_midrun"])
+        "ok", "tampered_input", "dependency_pending", "bad_output", "ownership_conflict", "contract_edit_midrun",
+        "schema_swap"])
     ap.add_argument("--now", default=DEFAULT_NOW)
     args = ap.parse_args(argv)
     ws = Path(args.workspace).resolve()

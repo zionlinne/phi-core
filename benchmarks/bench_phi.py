@@ -102,7 +102,8 @@ def main(argv=None):
         cons = [{"constraint_id": f"a{i}", "kind": "hard",
                  "predicate": {"type": "attested_value", "params": {"expected": True}}} for i in range(n)]
         ev = [sign_evidence(make_evidence(f"e{i}", f"a{i}", source="ci", verifier_id="hmac_attestation",
-                                          observed_value=True, timestamp=TS), "k", SECRET) for i in range(n)]
+                                          observed_value=True, timestamp=TS, binding={"task_id": "bench"}),
+                            "k", SECRET) for i in range(n)]
         c, s = contract(constraints=cons), state()
         res = engine.evaluate(c, s, ev, checkpoint="DISPATCH", trust_store=trust)
         assert res.verdict.value == "TRUE"

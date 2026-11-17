@@ -4,14 +4,20 @@
       "secret_hex": "5fd6f736656622cc04a6ade7233e2d3a170a1b24b36c9b9917c8eeaf88786171",
       "sources": [
         "ci-runner"
+      ],
+      "purposes": [
+        "evidence"
       ]
     },
     "acceptance-authority-demo": {
       "secret_hex": "596724116d0be49bfd2c86fd114eee66008f2d2da7ea389cb853aad245d1bad7",
       "sources": [
         "acceptance-authority"
+      ],
+      "purposes": [
+        "baseline-anchor"
       ]
     }
   },
-  "_comment": "PUBLIC DEMO KEYS ONLY. Real deployments must provision secrets out-of-band and never commit them."
+  "_comment": "PUBLIC DEMO KEYS ONLY. Real deployments must provision secrets out-of-band and never commit them. 'purposes' separates evidence signing from baseline anchoring."
 }
