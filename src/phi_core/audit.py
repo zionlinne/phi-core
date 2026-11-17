@@ -135,35 +135,35 @@ def verify_chain(lines: Iterable[str], anchor: Mapping[str, Any] | None = None) 
         try:
             rec = json.loads(line)
         except ValueError:
-            errors.append({"line": index, "code": "MALFORMED_LINE"})
+            errors.append({"line": index + 1, "code": "MALFORMED_LINE"})
             prev = None
             continue
         if not isinstance(rec, dict) or "record_hash" not in rec:
-            errors.append({"line": index, "code": "MALFORMED_RECORD"})
+            errors.append({"line": index + 1, "code": "MALFORMED_RECORD"})
             prev = None
             continue
         if record_hash_of(rec) != rec["record_hash"]:
-            errors.append({"line": index, "code": "RECORD_HASH_MISMATCH"})
+            errors.append({"line": index + 1, "code": "RECORD_HASH_MISMATCH"})
         if rec.get("seq") != index:
-            errors.append({"line": index, "code": "SEQUENCE_GAP_OR_REORDER"})
+            errors.append({"line": index + 1, "code": "SEQUENCE_GAP_OR_REORDER"})
         if prev is not None and rec.get("previous_record_hash") != prev:
-            errors.append({"line": index, "code": "CHAIN_LINK_BROKEN"})
+            errors.append({"line": index + 1, "code": "CHAIN_LINK_BROKEN"})
         if rec.get("record_type") == "phi_evaluation":
             missing = [f for f in EVALUATION_FIELDS if f not in rec]
             if missing:
-                errors.append({"line": index, "code": "MISSING_FIELDS", "fields": missing})
+                errors.append({"line": index + 1, "code": "MISSING_FIELDS", "fields": missing})
             snap = rec.get("snapshot")
             if isinstance(snap, dict):
                 c = snap.get("contract")
                 c_hash = safe_hash_obj({k: v for k, v in c.items() if k != "integrity"} if isinstance(c, dict) else c)
                 if c_hash != rec.get("contract_hash"):
-                    errors.append({"line": index, "code": "SNAPSHOT_CONTRACT_HASH_MISMATCH"})
+                    errors.append({"line": index + 1, "code": "SNAPSHOT_CONTRACT_HASH_MISMATCH"})
                 if safe_hash_obj(snap.get("state")) != rec.get("state_hash"):
-                    errors.append({"line": index, "code": "SNAPSHOT_STATE_HASH_MISMATCH"})
+                    errors.append({"line": index + 1, "code": "SNAPSHOT_STATE_HASH_MISMATCH"})
                 if safe_hash_obj(snap.get("evidence")) != rec.get("evidence_hash"):
-                    errors.append({"line": index, "code": "SNAPSHOT_EVIDENCE_HASH_MISMATCH"})
+                    errors.append({"line": index + 1, "code": "SNAPSHOT_EVIDENCE_HASH_MISMATCH"})
             else:
-                errors.append({"line": index, "code": "SNAPSHOT_MISSING"})
+                errors.append({"line": index + 1, "code": "SNAPSHOT_MISSING"})
         hashes[index] = rec["record_hash"]
         prev = rec["record_hash"]
     anchored = None

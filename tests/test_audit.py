@@ -64,6 +64,16 @@ def test_tamper_detection(tmp_path, trust, tamper, code):
     assert code in {e["code"] for e in report["errors"]}
 
 
+def test_error_line_numbers_are_one_based_file_lines(tmp_path, trust):
+    log = AuditLog(tmp_path / "a.jsonl")
+    populate(log, trust)
+    lines = log.path.read_text().splitlines()
+    lines[1] = lines[1].replace('"verdict": "', '"verdict": "X', 1)
+    log.path.write_text("\n".join(lines) + "\n")
+    errors = log.verify()["errors"]
+    assert {"line": 2, "code": "RECORD_HASH_MISMATCH"} in errors
+
+
 def test_snapshot_tamper_with_recomputed_record_hash_detected(tmp_path, trust):
     from phi_core.audit import record_hash_of
 
