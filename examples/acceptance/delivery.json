@@ -1,0 +1,51 @@
+{
+  "delivery_version": "1.0",
+  "baseline_id": "report-req",
+  "baseline_revision": 1,
+  "produced_by": "example-agent",
+  "claimed_status": "DONE",
+  "trace": [
+    {
+      "requirement_id": "R1",
+      "artifacts": [
+        "report/summary.json"
+      ]
+    },
+    {
+      "requirement_id": "R2",
+      "artifacts": [
+        "report/summary.json"
+      ]
+    },
+    {
+      "requirement_id": "R3",
+      "artifacts": [
+        "report/summary.json"
+      ]
+    },
+    {
+      "requirement_id": "R4",
+      "artifacts": [
+        "report/summary.json"
+      ]
+    }
+  ],
+  "evidence": [
+    {
+      "evidence_id": "acc-tests",
+      "constraint_id": "acceptance:tests",
+      "source": "ci-runner",
+      "verifier_id": "hmac_attestation",
+      "observed_value": {
+        "passed": true
+      },
+      "verification_status": "CLAIMED",
+      "timestamp": "2026-11-16T23:55:00Z",
+      "artifact_hash": null,
+      "provenance": {
+        "key_id": "ci-demo-key",
+        "signature": "1c12f0c7d236223267d2ef619edc726028cc2dfcae7b99b6327e78ee1c167167"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "anchor_version": "1.0",
+  "baseline_id": "report-req",
+  "revisions": [
+    {
+      "revision": 1,
+      "baseline_hash": "810fac6a17ab0736a2e30647063fb2de170c1254851778b8a994fbc9c9b127b4",
+      "previous_revision_hash": null,
+      "anchored_by": "acceptance-authority",
+      "anchored_at": "2026-11-01T00:00:00Z",
+      "key_id": "acceptance-authority-demo",
+      "signature": "2b983c0776be912233407fa8a6ea1a3dc89d0b7c562f0b6ea528c81c9ed0b2a1"
+    }
+  ]
+}

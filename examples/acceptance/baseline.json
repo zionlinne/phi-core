@@ -1,0 +1,64 @@
+{
+  "baseline_version": "1.0",
+  "baseline_id": "report-req",
+  "revision": 1,
+  "previous_revision_hash": null,
+  "frozen_at": "2026-11-01T00:00:00Z",
+  "design": {
+    "design_id": "report-design",
+    "version": "1.0",
+    "sha256": "bdbc635857acc4a9099dc2858a2762a2861c08627b2ccfe76d1baf450ebf60be",
+    "path": "design.md"
+  },
+  "requirements": [
+    {
+      "requirement_id": "R1",
+      "text": "summary report file is delivered",
+      "design_ref": "D1",
+      "verification": {
+        "method": "file",
+        "path": "report/summary.json"
+      }
+    },
+    {
+      "requirement_id": "R2",
+      "text": "summary matches the frozen schema",
+      "design_ref": "D1",
+      "verification": {
+        "method": "json_schema",
+        "path": "report/summary.json",
+        "schema_path": "schemas/summary.schema.json"
+      }
+    },
+    {
+      "requirement_id": "R3",
+      "text": "total equals sum of input amounts",
+      "verification": {
+        "method": "command",
+        "argv": [
+          "{python}",
+          "-c",
+          "import csv,json,sys; t=sum(float(r['amount']) for r in csv.DictReader(open('data/input.csv'))); sys.exit(0 if json.load(open('report/summary.json'))['total']==t else 1)"
+        ],
+        "timeout_seconds": 60
+      }
+    },
+    {
+      "requirement_id": "R4",
+      "text": "unit tests pass",
+      "verification": {
+        "method": "evidence",
+        "evidence_constraint_id": "acceptance:tests",
+        "expected": {
+          "passed": true
+        }
+      }
+    }
+  ],
+  "change_log": [
+    {
+      "revision": 1,
+      "summary": "initial frozen requirements"
+    }
+  ]
+}

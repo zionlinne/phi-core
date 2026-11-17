@@ -1,0 +1,72 @@
+[
+  {
+    "evidence_id": "ev-input:data/input.csv:exists",
+    "constraint_id": "input:data/input.csv:exists",
+    "source": "example-observer",
+    "verifier_id": "file_sha256",
+    "observed_value": {
+      "path": "data/input.csv"
+    },
+    "verification_status": "CLAIMED",
+    "timestamp": "2026-11-16T23:55:00Z",
+    "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
+    "provenance": {}
+  },
+  {
+    "evidence_id": "ev-input:data/input.csv:sha256",
+    "constraint_id": "input:data/input.csv:sha256",
+    "source": "example-observer",
+    "verifier_id": "file_sha256",
+    "observed_value": {
+      "path": "data/input.csv"
+    },
+    "verification_status": "CLAIMED",
+    "timestamp": "2026-11-16T23:55:00Z",
+    "artifact_hash": "985eabcbec90f96097dab26a1e1c8c30920209897c95d09bb147d73f93d875ee",
+    "provenance": {}
+  },
+  {
+    "evidence_id": "ev-output:report/summary.json:exists",
+    "constraint_id": "output:report/summary.json:exists",
+    "source": "example-observer",
+    "verifier_id": "file_sha256",
+    "observed_value": {
+      "path": "report/summary.json"
+    },
+    "verification_status": "CLAIMED",
+    "timestamp": "2026-11-16T23:55:00Z",
+    "artifact_hash": "479510595767f53fa920e088f69f48e831425716e7260d4c9ca6d75fbdba08aa",
+    "provenance": {}
+  },
+  {
+    "evidence_id": "ev-schema",
+    "constraint_id": "output:report/summary.json:schema",
+    "source": "example-observer",
+    "verifier_id": "json_schema",
+    "observed_value": {
+      "path": "report/summary.json",
+      "schema_path": "schemas/summary.schema.json"
+    },
+    "verification_status": "CLAIMED",
+    "timestamp": "2026-11-16T23:55:00Z",
+    "artifact_hash": null,
+    "provenance": {}
+  },
+  {
+    "evidence_id": "ev-tests",
+    "constraint_id": "tests:unit",
+    "source": "ci-runner",
+    "verifier_id": "hmac_attestation",
+    "observed_value": {
+      "passed": true
+    },
+    "verification_status": "CLAIMED",
+    "timestamp": "2026-11-16T23:55:00Z",
+    "artifact_hash": null,
+    "provenance": {
+      "run": "example-ci-1",
+      "key_id": "ci-demo-key",
+      "signature": "f5c0c2a5c206faccae9152d27f6e944069ff2a7fd1f2c0b6e6523b62c85763c0"
+    }
+  }
+]
