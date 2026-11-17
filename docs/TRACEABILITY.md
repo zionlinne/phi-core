@@ -61,7 +61,7 @@
 | CLI / JSON 协议 / stdin | `cli.py` | `test_cli.py` 全部 | 实现+测试 |
 | 外部命令门禁 | `phi gate-exec` | `test_gate_exec_runs_only_on_true`、`test_T_unknown_is_never_released`、CI smoke | 实现+测试 |
 | 通用 Harness Adapter + 统一 preflight/step/commit | `gate.HarnessAdapter`、`GatedRunner`、`GateSession` | `test_gate_adapter.py` | 实现+测试 |
-| 真实可运行最小 Harness，门禁真实阻止副作用 | `examples/minimal_harness/harness.py` | `test_T_harness_paused_and_blocked_scenarios_have_no_side_effects`、CI harness 步骤 | 实现+测试 |
+| 真实可运行最小 Harness，门禁真实阻止副作用 | `examples/minimal_harness/harness.py` | `test_T_harness_blocked_actions_never_run_and_completion_not_committed`、CI harness 步骤 | 实现+测试；在预检被阻止时无输出；之后被阻止时已放行步骤的输出保留（不回滚） |
 | 进程内门禁与 OS 级隔离边界 | `docs/SECURITY_BOUNDARIES.md` §2.1 | `test_O_boundary_direct_write_outside_library_is_not_prevented` | 文档+边界测试（**不防御**） |
 
 ## 6. 独立 Acceptance
@@ -112,7 +112,7 @@
 | Q 删除原始需求声称通过 | `test_Q_deleting_original_requirement_and_claiming_pass` | FAIL |
 | R 自报成功但偏离设计 | `test_R_self_reported_success_but_design_deviation`、`test_R_phi_true_does_not_imply_acceptance_pass` | FAIL，DDR>0 |
 | S 多子任务并发状态变化 | `test_S_concurrent_subtasks_with_state_changes` | 只有未受影响子任务提交；审计链完整 |
-| T UNKNOWN 错误放行 | `test_T_unknown_is_never_released`、`test_T_harness_paused_and_blocked_scenarios_have_no_side_effects` | 永不放行，无副作用 |
+| T UNKNOWN 错误放行 | `test_T_unknown_is_never_released`、`test_T_harness_blocked_actions_never_run_and_completion_not_committed` | 永不放行；被拒动作无副作用（已放行步骤不回滚） |
 | 属性/模糊 | `tests/test_properties.py`（8 项，Hypothesis derandomize） | 通过 |
 | 集成 | 示例 Harness 子进程、CLI 子进程、审计 CLI | 通过 |
 | 性能 | `tests/test_performance.py`、`benchmarks/bench_phi.py` | 记录数值；宽松上限 |
@@ -134,4 +134,5 @@
 5. **任意谓词/现实事实**：只覆盖已注册谓词与验证器；接口兼容仅限 JSON Schema。
 6. **多进程并发写审计**：有 `fcntl` 锁但未测试；非 POSIX 无锁。
 7. **平台**：仅在 Linux（本地 + GitHub Actions ubuntu）上运行过。
-8. **独立第三方测试**：尚未进行（由用户另行安排）。
+8. **不回滚**：已放行 STEP 的副作用在后续检查点失败时保留（§2.1）；原子提升需宿主实现。
+9. **独立第三方测试**：尚未进行（由用户另行安排）。

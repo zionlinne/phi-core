@@ -86,7 +86,7 @@ gate.guard("STEP", contract, latest_state_fn, latest_evidence_fn, action)   # �
 | 类别 | 内容 |
 | --- | --- |
 | 已实现 | Task Contract v1.0 Schema 与约束编译；Predicate Registry（11 个内置确定性谓词 + 可注册）；Evidence Verifier（file_sha256 / json_schema / hmac_attestation + 可注册）；确定性引擎（单任务 + 计划级）；PLAN/DISPATCH/STEP/COMMIT 门禁、会话契约钉扎、决策令牌；通用 HarnessAdapter + GatedRunner + 最小示例 Harness；JSONL SHA-256 审计链（重放/版本比较/证据追踪/状态重建）；独立 Acceptance（基线锚、设计 hash、追踪矩阵、DDR）；CLI 与 JSON 协议 |
-| 已测试 / 已通过（本地） | 208 项 pytest，含 A–T 对抗场景、Hypothesis 属性/模糊测试、集成、绕过、重放、性能测试。远端 CI 结果见 PR |
+| 已测试 / 已通过（本地） | 209 项 pytest，含 A–T 对抗场景、Hypothesis 属性/模糊测试、集成、绕过、重放、性能测试。远端 CI 结果见 PR |
 | 未验证 | 非 Linux 平台；Python 3.11/3.12/3.13 以外版本；大规模真实工作负载；多进程同时写同一审计文件（已加 `fcntl` 锁，但仅测试了多线程） |
 | 已知限制 | 见 [docs/SECURITY_BOUNDARIES.md](docs/SECURITY_BOUNDARIES.md)：进程内库无法阻止不经过它的代码；HMAC 只证明持有共享密钥；审计链无外部锚时可被整链重写；状态 `S` 由宿主提供并被信任；无法验证任意现实世界事实，只能验证已注册谓词/验证器所覆盖的内容 |
 

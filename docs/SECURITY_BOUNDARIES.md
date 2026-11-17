@@ -30,6 +30,11 @@ phi-core 是 Python 库。它**无法阻止**不经过它的代码：同进程�
 宿主进程里经 `PhiGate.guard` 或 `phi gate-exec` 启动的动作；Agent 无权修改 phi-core、TrustStore、
 审计日志与验收锚。
 
+**门禁不回滚。** 每个 STEP 在执行前裁决；裁决 TRUE 的步骤其副作用会真实发生。之后某个检查点（下一 STEP
+或 COMMIT）若为 FALSE/UNKNOWN，只阻止后续动作与"完成"状态转换，不撤销已写入的文件。示例 Harness 中
+`bad_output` 场景留下 `output/*`（但任务状态仍为 `ready`，COMMIT 被 BLOCK），`contract_edit_midrun` 留下
+`output/upper.txt`。需要原子性的宿主应在临时目录执行步骤，仅在 COMMIT 为 TRUE 后再提升结果。
+
 ### 2.2 HMAC 签名的含义
 
 `hmac_attestation` 只证明"签名者持有 TrustStore 中该共享密钥"。它**不**证明人的身份或作者身份；

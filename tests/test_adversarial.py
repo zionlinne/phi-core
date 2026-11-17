@@ -496,7 +496,7 @@ def test_T_unknown_is_never_released(scenario, ws, trust, tmp_path):
     assert run.returncode == 20 and not marker.exists()
 
 
-def test_T_harness_paused_and_blocked_scenarios_have_no_side_effects(tmp_path):
+def test_T_harness_blocked_actions_never_run_and_completion_not_committed(tmp_path):
     script = ROOT / "examples" / "minimal_harness" / "harness.py"
     expected = {"ok": (0, "completed"), "dependency_pending": (20, "ready"), "tampered_input": (10, "ready"),
                 "bad_output": (10, "ready"), "ownership_conflict": (10, "ready"), "contract_edit_midrun": (20, "ready")}
@@ -512,6 +512,9 @@ def test_T_harness_paused_and_blocked_scenarios_have_no_side_effects(tmp_path):
             assert outputs == [] and out["executed_steps"] == []
         if name == "contract_edit_midrun":
             assert out["executed_steps"] == ["uppercase"] and outputs == ["output/upper.txt"]
+        if name == "bad_output":
+            # Not rolled back: steps released at STEP keep their files; COMMIT blocks completion only.
+            assert out["executed_steps"] == ["uppercase", "count"] and len(outputs) == 2
         if name == "ok":
             assert out["executed_steps"] == ["uppercase", "count"]
         log = AuditLog(out["audit_log"])
