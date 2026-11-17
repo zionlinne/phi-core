@@ -74,22 +74,43 @@ def _resolve(value: Any) -> Any:
     return value() if callable(value) else value
 
 
-def _takes_checkpoint(fn: Callable[..., Any]) -> bool:
+class EvidenceProviderError(TypeError):
+    """The evidence provider's call signature cannot be determined, so the gate
+    cannot know whether it would receive the checkpoint. Nothing is released."""
+
+
+def _checkpoint_call(fn: Callable[..., Any]) -> str:
+    """How to hand the checkpoint to a provider: "positional", "keyword" or "none".
+
+    Any parameter that can receive the checkpoint receives it, defaulted or not:
+    the first positional slot, ``*args``, a keyword-only ``checkpoint`` or
+    ``**kwargs``. Only a provider with no parameter at all is called without it.
+    """
     try:
-        params = inspect.signature(fn).parameters.values()
-    except (TypeError, ValueError):
-        return False
-    return any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD) and p.default is p.empty
-               or p.kind is p.VAR_POSITIONAL for p in params)
+        params = list(inspect.signature(fn).parameters.values())
+    except (TypeError, ValueError) as exc:
+        raise EvidenceProviderError(f"evidence provider signature cannot be inspected: {fn!r}") from exc
+    if any(p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD, p.VAR_POSITIONAL) for p in params):
+        return "positional"
+    if any(p.kind is p.KEYWORD_ONLY and p.name == "checkpoint" or p.kind is p.VAR_KEYWORD for p in params):
+        return "keyword"
+    if params:
+        raise EvidenceProviderError(
+            f"evidence provider takes only keyword-only parameters other than 'checkpoint': {fn!r}")
+    return "none"
 
 
 def _resolve_evidence(evidence: Any, checkpoint: str) -> Any:
-    """Evidence for one checkpoint. A provider that takes a positional argument is
-    called with the checkpoint being evaluated (so PLAN, DISPATCH, STEP and COMMIT
-    each get their own latest evidence); a zero-argument provider is called as is."""
+    """Evidence for one checkpoint (PLAN, DISPATCH, STEP and COMMIT each get their
+    own). Exceptions raised by the provider propagate: the action is not released."""
     if not callable(evidence):
         return evidence
-    return evidence(checkpoint) if _takes_checkpoint(evidence) else evidence()
+    how = _checkpoint_call(evidence)
+    if how == "positional":
+        return evidence(checkpoint)
+    if how == "keyword":
+        return evidence(checkpoint=checkpoint)
+    return evidence()
 
 
 class PhiGate:
