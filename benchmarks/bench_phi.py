@@ -143,6 +143,29 @@ def main(argv=None):
             cases.append({"case": "acceptance_file_requirements", "n": n,
                           **timeit(lambda: run_acceptance(b, a, d, workspace=ws, now=NOW), r)})
 
+    check = b"import sys\nsys.exit(0)\n"
+    for n in ([10, 1000] if args.quick else [10, 1000, 5000]):
+        with tempfile.TemporaryDirectory() as tmp:
+            ws = Path(tmp)
+            (ws / "design.md").write_bytes(b"d")
+            (ws / "check.py").write_bytes(check)
+            (ws / "data").mkdir()
+            for i in range(n):
+                (ws / "data" / f"f{i}.txt").write_bytes(b"x" * 1024)
+            req = {"requirement_id": "R1", "text": "t", "verification": {
+                "method": "command", "argv": ["{python}", "check.py"],
+                "pinned_files": [{"path": "check.py", "sha256": hashlib.sha256(check).hexdigest()}]}}
+            b = {"baseline_version": "1.0", "baseline_id": "B", "revision": 1, "previous_revision_hash": None,
+                 "frozen_at": NOW, "design": {"design_id": "D", "version": "1",
+                                              "sha256": hashlib.sha256(b"d").hexdigest(), "path": "design.md"},
+                 "requirements": [req], "change_log": [{"revision": 1, "summary": "s"}]}
+            a = {"anchor_version": "1.0", "baseline_id": "B", "revisions": [make_anchor_entry(b, anchored_by="x", anchored_at=NOW)]}
+            d = {"delivery_version": "1.0", "baseline_id": "B", "baseline_revision": 1, "trace": [{"requirement_id": "R1"}]}
+            assert run_acceptance(b, a, d, workspace=ws, now=NOW)["status"] == "PASS"
+            cases.append({"case": "acceptance_command_snapshot", "n": n, "workspace_files": n + 2,
+                          "file_bytes_each": 1024,
+                          **timeit(lambda: run_acceptance(b, a, d, workspace=ws, now=NOW), r)})
+
     out = {
         "tool": "benchmarks/bench_phi.py",
         "method": "time.perf_counter wall time; 1 warm-up + N repeats; min/median/max. "

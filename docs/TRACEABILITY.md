@@ -133,7 +133,7 @@
 | --- | --- | --- | --- |
 | 1 SCHEMA-CRITERION-MUTABLE | 契约 `outputs[].schema_sha256/schema_refs`、基线 `schema_sha256/schema_refs` 冻结 Schema 闭包；未冻结 UNKNOWN/INCONCLUSIVE，字节变化 FALSE/FAIL；示例与 Harness 已冻结 | `safeschema.pin_issue`、`predicates.SchemaCompatible`、`acceptance._check_json_schema`、`contracts.compile_constraints` | `test_1_*`、`test_replay_reproduces_binding_and_schema_decisions`、Harness `schema_swap` |
 | 2 SCHEMA-REF-FETCH | 受控 `referencing.Registry`：片段、工作区相对文件、本地元 Schema；其余不可解析；结构化错误码；验收方法异常 → INCONCLUSIVE | `safeschema.check_document`、`evidence.JsonSchemaVerifier`、`acceptance.run_acceptance` | `test_2_*`（含 HTTP 计数服务器、socket 禁用、hypothesis 随机 `$ref`） |
-| 3 ACCEPT-COMMAND-UNPINNED-SCRIPT | `pinned_files` 运行前后 hash、`artifacts` 声明、argv 未冻结工作区文件 → INCONCLUSIVE | `acceptance._check_command`、`_unpinned_workspace_files` | `test_3_*` |
+| 3 ACCEPT-COMMAND-UNPINNED-SCRIPT | `pinned_files` 运行前后 hash、`artifacts` 声明、argv 未冻结工作区文件 → INCONCLUSIVE（1.0.2 起由 `phi_core.command` 实现，见 §12） | `acceptance._check_command`、`command.run_command` | `test_3_*` |
 | 4 ANCHOR-KEY-SOURCES-IGNORED | 密钥用途域（`evidence` / `baseline-anchor`，缺省 `evidence`）；签名后不得出现未签名修订 | `evidence.TrustStore`、`acceptance._verify_anchor` | `test_4_*` |
 | 5 RUNNER-PLAN-USES-DISPATCH-EVIDENCE | provider 按检查点调用；`GatedRunner` 传入 `collect_evidence` | `gate._resolve_evidence`、`GatedRunner.run` | `test_5_*` |
 | 6 EVIDENCE-NOT-BOUND-TO-TASK | 签名覆盖的 `binding`；Φ 核对任务/契约/检查点，验收核对基线/修订/需求；未绑定证明不使用 | `evaluator._binding_problem`、`acceptance._check_evidence`、`evidence.EvidenceItem` | `test_6_*`、`test_concurrent_tasks_never_share_attestations` |
@@ -141,6 +141,19 @@
 既有测试的适配（未改断言语义）：`tests/conftest.py` 的 `attest` 默认绑定测试任务；`tests/test_adversarial.py` 的夹具冻结
 Schema、为验收权威密钥加 `baseline-anchor` 用途；`tests/test_acceptance.py` 的两条验收证据绑定 `report-req`；
 `tests/test_engine.py` 的版本断言改为 `phi-core/1.0.1`；`benchmarks/bench_phi.py` 的证明绑定 `bench` 任务。
+
+## 12. 独立复测（6bca32e）缺陷修复映射（1.0.2）
+
+原始失败输入/输出、原样 probe 输出及"新回归在 6bca32e 上失败"的记录保存在交付 ZIP 的 `phi-core-v1-round3/01-repro-6bca32e/`。
+
+| 缺陷 | 修复 | 代码 | 测试 |
+| --- | --- | --- | --- |
+| N1 COMMAND-ARTIFACT-EXEMPTS-CRITERION | 程序/数据分角色：工作区程序（脚本/目录程序、`-m` 可加载的每个文件、工作区 `argv[0]`）必须冻结，`artifacts` 只豁免 `{python}` 程序的数据参数；非 `{python}` 程序 argv 中的工作区文件全部必须冻结 | `command._plan_python`、`_module_candidates`、`_plan_external`、`_run` | `test_n1_*`（14 种别名 × 回归与正例）、`test_property_unpinned_or_escaping_program_never_passes` |
+| N2 COMMAND-SYMLINK-SKIPS-UNPINNED-GUARD | 路径先字面检查再严格解析；逃逸、悬空、循环、`..`、绝对别名 → INCONCLUSIVE；`O_NOFOLLOW` 读取；PATH 清理；解释器/程序在工作区内拒绝；无关外链不跟随不复制 | `command._Paths`、`_read_nofollow`、`_clean_path`、`_copy_workspace` | `test_n2_*`（含外部 FIFO 证明未读取） |
+| N3 RUNNER-DEFAULTED-CHECKPOINT-IGNORED | provider 只要能接收检查点就收到：任一位置参数（含默认值）、`*args`、kw-only `checkpoint`、`**kwargs`；零参兼容；签名不可判定或只有其他 kw-only 参数 → `EvidenceProviderError`；provider 异常传播 | `gate._checkpoint_call`、`_resolve_evidence` | `test_n3_*`（9 种签名 × 每阶段取证 × 四个检查点各自 FALSE） |
+| N4 COMMAND-PIN-RESTORE-DURING-RUN | 命令在工作区外私有快照中运行，标准文件写入已核对的内存字节；运行后核对快照与工作区；输出不跟随链接写回 | `command._run`、`_write_back` | `test_n4_*`（确定性竞态：改—读—还原 → FAIL；正确产物 → PASS） |
+
+既有测试未改动断言；`tests/test_engine.py` 的版本断言改为 `phi-core/1.0.2`。
 
 ## 明确未覆盖 / 限制
 
@@ -152,8 +165,8 @@ Schema、为验收权威密钥加 `baseline-anchor` 用途；`tests/test_accepta
 6. **多进程并发写审计**：有 `fcntl` 锁但未测试；非 POSIX 无锁。
 7. **平台**：仅在 Linux（本地 + GitHub Actions ubuntu）上运行过。
 8. **不回滚**：已放行 STEP 的副作用在后续检查点失败时保留（§2.1）；原子提升需宿主实现。
-9. **独立第三方测试**：对 963d12b 的独立测试报告了 6 项缺陷，1.0.1 的修复见 §11；对 1.0.1 的独立复测尚未进行，
-   本文件不声称其通过。
-10. **验收命令依赖**：只识别 argv 中直接出现的工作区文件；程序内部读取、import、自动发现的配置必须由基线作者列入
-    `pinned_files`（安全边界 §2.7）。
+9. **独立第三方测试**：对 963d12b 的独立测试报告了 6 项缺陷（§11）；对 6bca32e 的独立复测确认其中 5 项已修复，并报告
+   命令冻结仍未修复及 3 项新缺陷（§12）。对 1.0.2 的独立复测尚未进行，本文件不声称其通过。
+10. **验收命令依赖**：只从 argv 识别程序与数据；程序内部 import 或打开、但未冻结的工作区文件以运行开始时的副本出现在快照中，
+    不受冻结保护；冻结检查器执行被测代码时结果只达到检查器自身的隔离程度；快照不防同一 OS 账号的恶意进程（安全边界 §2.7）。
 11. **Schema 闭包惰性**：只检查本次校验实际加载的引用文件（安全边界 §2.9）。

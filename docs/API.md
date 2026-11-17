@@ -6,7 +6,7 @@
 from phi_core import (
     evaluate, PhiEngine, Verdict,                     # Φ
     PhiGate, GateSession, GatedRunner, HarnessAdapter, Step,
-    GateBlocked, GateNeedsEvidence, DecisionInvalid, GateSequenceError,
+    GateBlocked, GateNeedsEvidence, DecisionInvalid, GateSequenceError, EvidenceProviderError,
     TrustStore, make_evidence, sign_evidence, observe_files, verify_evidence,
     PredicateRegistry, FunctionPredicate, StatePredicate, EvidencePredicate, default_predicate_registry,
     VerifierRegistry, default_verifier_registry,
@@ -50,8 +50,17 @@ session.step(state_fn, evidence_fn, action)             # requires released pref
 session.commit(state_fn, evidence_fn, action)
 ```
 
-`state_fn` / `evidence_fn` 可以是可调用对象，门禁在评估时才调用，保证使用最新输入。`evidence_fn` 若接受一个位置参数，
-门禁以当前检查点调用它（`evidence_fn("PLAN")`、`evidence_fn("DISPATCH")` ……）；零参数可调用对象仍按原样调用。
+`state_fn` / `evidence_fn` 可以是可调用对象，门禁在评估时才调用，保证使用最新输入。`evidence_fn` 只要**能**接收检查点就会收到它，
+与参数是否有默认值无关：
+
+| provider 签名 | 调用方式 |
+| --- | --- |
+| 有任一位置参数（必需或有默认值，含仅位置参数）或 `*args` | `evidence_fn(checkpoint)` |
+| 只有关键字参数且其中有 `checkpoint`（必需或有默认值），或有 `**kwargs` | `evidence_fn(checkpoint=checkpoint)` |
+| 无任何参数 | `evidence_fn()`（兼容旧 provider） |
+| 只有其他名字的仅关键字参数，或签名无法检查 | 抛出 `EvidenceProviderError`（`TypeError` 子类），不放行 |
+
+可调用对象按其 `__call__` 签名、`functools.partial` 按剩余参数判断。provider 抛出的异常原样传播，当前及后续动作都不执行。
 
 ### Harness Adapter
 
@@ -114,7 +123,7 @@ report["phi_verdict_consulted"]  # always False
 | method | 行为 | 结果 |
 | --- | --- | --- |
 | `file` | 工作区文件存在，可选 sha256 | PASS / FAIL |
-| `command` | `argv`（不经 shell，`{python}` 替换为当前解释器），工作区为 cwd，超时；`pinned_files[{path, sha256}]` 运行前后重新 hash；`artifacts[relpath]` 声明 argv 可引用的被检交付物 | 期望退出码 PASS / 其他 FAIL / 冻结文件缺失或被改（运行前或运行中）FAIL / argv 指向未冻结且未声明的工作区文件 INCONCLUSIVE / 超时或无法运行 INCONCLUSIVE |
+| `command` | `argv`（不经 shell，`{python}` 替换为当前解释器），超时；`pinned_files[{path, sha256}]` 是标准文件，工作区内被执行的程序必须在其中；`artifacts[relpath]` 只豁免 `{python}` 程序的数据参数；命令在工作区外的私有快照中运行，标准文件写入的是已核对的字节（见安全边界 2.7） | 期望退出码 PASS / 其他 FAIL / 冻结文件缺失或被改（运行前、运行中、快照中）FAIL / 程序未冻结、数据参数未冻结也未声明、路径逃逸或别名 INCONCLUSIVE / 超时或无法运行 INCONCLUSIVE |
 | `json_schema` | 工作区 JSON 符合**冻结**的工作区 Schema（`schema_sha256`，引用文件 `schema_refs`），引用解析不访问网络或工作区外 | PASS / 不符合或冻结字节被改 FAIL / 未冻结、引用不可解析、Schema 缺失 INCONCLUSIVE |
 | `evidence` | 交付报告中的证据经 Evidence Verifier 验证，`binding.baseline_id` 为本基线（可选 `baseline_revision` / `requirement_id`），值与 `expected` 相等 | PASS / FAIL / 缺失、未绑定、绑定到其他基线或冲突 INCONCLUSIVE |
 | `manual`, `llm_judgment` | 不可自动判定 | 永远 INCONCLUSIVE |
@@ -144,3 +153,20 @@ trust JSON 中 `"purposes": ["baseline-anchor"]`）。用途缺省为 `["evidenc
 
 新增导出：`check_document`、`pin_issue`、`SchemaCheck`、`PURPOSE_EVIDENCE`、`PURPOSE_BASELINE_ANCHOR`。
 自定义验证器若其观测值完全由验证器在工作区重新计算，可声明类属性 `reobserves = True`，其证据无需绑定；否则必须绑定。
+
+## 1.0.2 协议变化（不兼容）
+
+1.0.2 修复独立复测（6bca32e）报告的 4 个缺陷。结果只会从 PASS/COMPLETED 变为 INCONCLUSIVE/FAIL/BLOCKED，或使 provider 收到之前漏传的检查点。
+
+| 变化 | 1.0.1 行为 | 1.0.2 行为 | 迁移 |
+| --- | --- | --- | --- |
+| 程序与数据分角色 | `artifacts` 覆盖到的任何 argv 文件都免冻结，包括被执行的脚本本身 | 工作区内被执行的程序（`{python}` 脚本/目录、`-m` 可加载的模块文件及其包 `__init__`/`__main__`、无扩展名或已编译模块、工作区内的 `argv[0]`）必须在 `pinned_files` 中，`artifacts` 不豁免；`artifacts` 只豁免 `{python}` 程序的数据参数；非 `{python}` 程序的 argv 中所有工作区文件都必须冻结 | 把检查脚本/模块列入 `pinned_files`；非 Python 工具的被检数据改由冻结的 `{python}` 包装脚本读取 |
+| 路径失败即关闭 | 解析到工作区外的符号链接被当作非工作区参数放行 | argv/`-m`/`--opt=` 中经符号链接或目录链接解析到工作区外、悬空或循环的链接、相对 `..` 逃逸 → INCONCLUSIVE `COMMAND_PATH_ESCAPES_WORKSPACE`；指向工作区的绝对路径（含工作区外指回来的别名）→ INCONCLUSIVE `COMMAND_ABSOLUTE_WORKSPACE_PATH`；不读取外部目标内容 | 在 argv 中使用工作区相对路径 |
+| PATH | 宿主 PATH 原样传入 | 删除空项、相对项以及位于工作区内的项；裸程序名在清理后的 PATH 上解析为绝对路径，解析到工作区内 → INCONCLUSIVE `COMMAND_PROGRAM_IN_WORKSPACE`；解释器在工作区内 → `COMMAND_INTERPRETER_IN_WORKSPACE` | 无 |
+| 执行位置 | cwd = 工作区，运行前后比较 hash | cwd = 工作区外的私有快照（0700 临时目录）：工作区副本（不含 `__pycache__`、不含离开工作区的链接）+ 已核对的标准字节；运行后核对快照与工作区；命令新建或修改的非标准文件不跟随链接地写回工作区；stdin 为空 | 依赖在工作区写文件的检查器无需改动；依赖从工作区读取被排除内容（`__pycache__`、外链）的检查器需调整 |
+| provider 检查点 | 只看必需位置参数个数，`checkpoint="DISPATCH"` 之类的默认参数永远拿到默认值 | 见上文 provider 签名表；签名不可判定 → `EvidenceProviderError` | 无需改动 |
+| 版本号 | `phi-core/1.0.1` | `phi-core/1.0.2`、`phi-core-acceptance/1.0.2` | 回放旧记录时 `replayed_evaluator_version` 不同 |
+
+新增：模块 `phi_core.command`（验收命令协议），导出 `EvidenceProviderError`。`command` 结果 `detail` 新增 `execution`
+（`cwd`、`program`、`argv_roles`、`files_copied`、`omitted_links_leaving_workspace`、`skipped`、`outputs_written_back`、
+`outputs_not_written_back`）；`COMMAND_WORKSPACE_FILE_NOT_PINNED` 的 `detail` 新增 `program_not_pinned`、`data_not_pinned_or_declared`。

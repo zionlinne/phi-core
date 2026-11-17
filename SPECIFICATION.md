@@ -1,7 +1,8 @@
 # phi-core 规格说明 v1.0
 
-本文件描述 `phi-core 1.0.1`（`evaluator_version = "phi-core/1.0.1"`，`acceptance_version = "phi-core-acceptance/1.0.1"`）
-**实际实现**的行为。相对 1.0.0 的不兼容变化见 [docs/API.md §1.0.1 协议变化](docs/API.md#101-协议变化不兼容)。
+本文件描述 `phi-core 1.0.2`（`evaluator_version = "phi-core/1.0.2"`，`acceptance_version = "phi-core-acceptance/1.0.2"`）
+**实际实现**的行为。不兼容变化见 [docs/API.md §1.0.1 协议变化](docs/API.md#101-协议变化不兼容) 与
+[§1.0.2 协议变化](docs/API.md#102-协议变化不兼容)。
 JSON Schema 位于 `schemas/`，是结构的规范来源。
 
 ## 1. 算子定义
@@ -154,8 +155,9 @@ observed_value, verification_status, timestamp, artifact_hash, provenance`，以
 
 检查点：`PLAN`、`DISPATCH`、`STEP`、`COMMIT`。`PhiGate.guard` / `GateSession` 在每次动作前用**最新**
 的 T/S/E 重新评估（含重新验证证据），只有 TRUE 才调用动作；FALSE 抛 `GateBlocked`，UNKNOWN 抛
-`GateNeedsEvidence`。证据 provider 若接受一个位置参数，门禁以当前检查点调用它，因此 PLAN、DISPATCH、STEP、COMMIT
-各自取得该时点最新的证据（`GatedRunner` 直接传入 `adapter.collect_evidence`）；零参数 provider 仍被支持。
+`GateNeedsEvidence`。证据 provider 只要能接收检查点（任一位置参数，无论有无默认值；`*args`；仅关键字参数 `checkpoint`；
+`**kwargs`）就以当前检查点调用，因此 PLAN、DISPATCH、STEP、COMMIT 各自取得该时点最新的证据（`GatedRunner` 直接传入
+`adapter.collect_evidence`）；零参数 provider 仍被支持；签名不可判定 → `EvidenceProviderError`，不放行。
 `GateSession.preflight` 依次检查 PLAN 与 DISPATCH，并把当时的契约 hash 钉扎到后续
 检查点的 S 副本中。`Decision.token` 是对 (checkpoint, task, 三个 hash, verdict, 版本) 的 HMAC；
 `authorize` 校验令牌并**重新评估**，任何 hash 或结论变化都拒绝（`STALE_DECISION`）。
@@ -189,7 +191,7 @@ reason_codes, evaluator_version, timestamp, snapshot{contract, state, evidence},
 要点：需求只来自冻结基线；基线 hash 必须等于独立锚（可 HMAC 签名）中当前修订；设计文档 hash 必须一致；
 每条需求按 `file / command / json_schema / evidence` 自动验证，`manual / llm_judgment` 只能 INCONCLUSIVE；
 锚条目只能由具有 `baseline-anchor` 用途的密钥签署（证据密钥 → FAIL `ANCHOR_KEY_NOT_AUTHORIZED_FOR_BASELINE`），已签名修订之后
-出现未签名修订 → FAIL `ANCHOR_UNSIGNED_REVISION_AFTER_SIGNED`；`command` 方法遵循冻结文件协议（`pinned_files` / `artifacts`，
+出现未签名修订 → FAIL `ANCHOR_UNSIGNED_REVISION_AFTER_SIGNED`；`command` 方法遵循冻结标准协议（程序必须冻结、`artifacts` 只豁免数据参数、路径失败即关闭、在私有快照中运行，
 见安全边界 2.7）；`json_schema` 遵循 2.3 的冻结规则；`evidence` 方法只使用 `binding.baseline_id` 等于本基线的证据
 （可选 `baseline_revision`、`requirement_id` 进一步限定）；方法内部任何异常 → INCONCLUSIVE `VERIFICATION_ERROR`；
 追踪矩阵缺项 → FAIL；任一 FAIL → FAIL；否则任一 INCONCLUSIVE 或无需求 → INCONCLUSIVE；否则 PASS。

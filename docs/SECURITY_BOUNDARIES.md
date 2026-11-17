@@ -19,6 +19,10 @@
 | 工作区 Schema 被改不能使 Φ TRUE / 验收 PASS | 契约/基线冻结 Schema 闭包 hash | `test_1_*`（`tests/test_round2_fixes.py`） |
 | Schema 校验不访问网络、不读工作区外文件，失败不抛出入口 | `safeschema` 受控 registry | `test_2_*` |
 | 被改或缺失的冻结验收脚本/配置不能 PASS | `pinned_files` 运行前后 hash | `test_3_*` |
+| `artifacts` 不能豁免被执行的程序；任何别名都不行 | 程序/数据分角色 | `test_n1_*`（`tests/test_round3_fixes.py`） |
+| 链接逃逸、悬空/循环链接、`..`、绝对别名、PATH 歧义失败即关闭，不读外部目标 | 字面检查 + 严格解析 + `O_NOFOLLOW` | `test_n2_*` |
+| provider 只要能接收检查点就收到检查点 | 按签名分派 | `test_n3_*` |
+| 命令读取的是冻结的标准字节，运行中改写并还原无效 | 私有快照 + 已核对字节 | `test_n4_*` |
 | 证据密钥不能批准需求变更 | 密钥用途域 `baseline-anchor` | `test_4_*` |
 | 每个检查点使用该时点的证据 | provider 按检查点调用 | `test_5_*` |
 | 证明不能跨任务/契约/检查点/基线复用 | 签名覆盖的 `binding` | `test_6_*` |
@@ -76,20 +80,51 @@ phi-core 只验证**已注册谓词和验证器覆盖的内容**：文件存在/
 
 ### 2.7 验收命令的执行
 
-`command` 方法会在工作区中执行**基线中冻结的** argv（不经 shell，环境只保留 PATH）。受支持的协议：
+`command` 方法执行**基线中冻结的** argv（不经 shell，环境只保留清理后的 PATH，stdin 为空）。实现见 `phi_core.command`。
+
+**角色。** 基线作者显式声明，库不从 `artifacts` 推断：
 
 1. argv 文本由基线 hash 冻结。
-2. 作为标准一部分的工作区文件（测试脚本、配置、fixture）由基线作者列入 `pinned_files[{path, sha256}]`；运行前逐个重新
-   hash，缺失 → FAIL `COMMAND_PINNED_FILE_MISSING`，不符 → FAIL `COMMAND_PINNED_FILE_MODIFIED`，此时命令**不运行**；
-   运行后再 hash 一次，被改 → FAIL `COMMAND_PINNED_FILE_MODIFIED_DURING_RUN`。结果 `detail.pinned_files_verified` 记录已核对的文件。
-3. 被检的交付物列入 `artifacts`（文件或目录）。
-4. argv 中直接指向工作区文件的参数（路径参数、`-m module`、`--opt=path`、目录）若既未冻结也未声明为交付物 →
-   INCONCLUSIVE `COMMAND_WORKSPACE_FILE_NOT_PINNED`。
+2. **标准文件**（检查脚本、模块、配置、fixture）列入 `pinned_files[{path, sha256}]`。库读取一次、在内存中 hash，缺失 → FAIL
+   `COMMAND_PINNED_FILE_MISSING`，不符 → FAIL `COMMAND_PINNED_FILE_MODIFIED`，命令**不运行**。
+3. **程序**是命令从工作区执行的代码：`{python}` 的脚本（或目录程序）、`-m mod` 能从工作区加载的每个文件（`mod.py`、`mod.pyc`、
+   扩展模块、包的 `__init__`/`__main__`）、工作区内的 `argv[0]`。程序必须是标准文件；`artifacts` 不能豁免程序，即使列出的是
+   该文件、其父目录、`.` 或任何别名。未冻结 → INCONCLUSIVE `COMMAND_WORKSPACE_FILE_NOT_PINNED`（`detail.program_not_pinned`）。
+4. **数据**：`{python}` 程序的脚本参数（及 `--opt=path` 的值）若指向工作区文件，必须被冻结或位于 `artifacts` 内
+   （`detail.data_not_pinned_or_declared`）。数据参数不会被当成程序。对 `{python}` 以外的程序，库无法区分它的参数是数据还是
+   代码（例如 `sh check.sh`），因此 argv 中所有工作区文件都必须冻结，`artifacts` 不起豁免作用（`detail.argv_roles =
+   "unparsed-program-all-pinned"`）。
 
-边界：第 4 条只识别 argv 中**直接出现**的工作区文件，是对"运行交付树里的脚本"这一常见情形的保护，**不是**对程序依赖的
-自动枚举。程序在内部按名字打开的文件、`import` 的模块、自动发现的配置（如 `conftest.py`、`pyproject.toml`、`.pth`）、
-环境变量指向的内容，库都看不到；这些必须由基线作者列入 `pinned_files`，否则不受保护。工作区外的程序（解释器、系统工具）
-同样不被 hash。命令运行在生产者产出的工作区上，宿主应在隔离环境中运行验收。
+**路径失败即关闭。** argv、`-m` 候选和 `--opt=` 值中的路径先按字面检查、再解析：经文件或目录符号链接解析到工作区外、
+悬空链接、循环链接、相对 `..` 逃逸 → INCONCLUSIVE `COMMAND_PATH_ESCAPES_WORKSPACE`；指向工作区的绝对路径（包括工作区外
+指回工作区的别名）→ INCONCLUSIVE `COMMAND_ABSOLUTE_WORKSPACE_PATH`。这些情况下命令不运行，外部链接目标的内容不被读取
+（测试用指向工作区外 FIFO 的链接验证：读取会阻塞）。标准文件逐级以 `O_NOFOLLOW` 打开，解析后被换成链接的路径分量会导致读取失败
+而不是读到工作区外。PATH 中的空项、相对项、工作区内的项被删除，裸程序名解析为绝对路径后再执行；解释器或解析出的程序位于工作区内
+→ INCONCLUSIVE。
+
+**冻结快照。** 命令的 cwd 是库新建的私有目录（`tempfile.mkdtemp`，模式 0700，位于工作区外）：先复制工作区（跳过
+`__pycache__`，离开工作区的链接不跟随、不复制并列入 `detail.execution.omitted_links_leaving_workspace`，工作区内的链接重建为
+指向快照内对应位置的链接，FIFO 等特殊文件跳过），再用**第 2 步已核对的内存字节**覆盖每个标准文件。因此运行期间对工作区的写入
+（包括"改标准—运行—还原"）不影响命令读到的字节。运行后：快照中的标准文件被改 → FAIL `COMMAND_PINNED_FILE_MODIFIED_DURING_RUN`
+（`detail.where = "snapshot"`）；工作区标准文件被改且未还原 → 同一代码（`where = "workspace"`）；命令新建或修改的其他文件以
+`O_NOFOLLOW` 逐级写回工作区（标准文件与 `__pycache__` 不写回；路径上有链接则拒绝并列入 `outputs_not_written_back`），快照随后删除。
+
+**可信检查器与不可信产物。** 标准文件由基线作者冻结、由验收方签名的锚确认，库**信任**其行为：作者签署的检查器若本身恶意
+（例如无条件 `exit 0`），库无法发现，这是作者的责任，而不是被测产物能够利用的漏洞。被测产物（生产者写入工作区的一切）是**不可信**的：
+它不能改变标准字节（第 2 步与快照保证），不能借 `artifacts` 让自己成为程序（第 3 步），不能用链接或别名把程序指到别处（路径规则）。
+但如果冻结的检查器**主动执行**被测代码（`import` 交付模块、`pytest` 收集交付目录里的 `conftest.py` 等），被测代码就运行在命令进程中，
+可以伪造退出码或改写快照；这时结果只能达到检查器自身隔离被测代码的程度。库不提供 OS 级沙箱。
+
+**边界。** 快照仅靠文件模式与随机路径与其他进程隔离：同一 OS 账号下的恶意进程可以找到并修改快照，库对此**不作承诺**；需要这种
+隔离的宿主应以独立账号或容器运行验收。工作区外的程序（解释器、系统工具、宿主在工作区外安装的检查器）被视为宿主可信，不被 hash。
+程序在内部按名字 `import` 或打开、但未列入 `pinned_files` 的工作区文件，会以运行开始时的副本出现在快照中，其内容不受冻结保护
+（与 1.0.1 相同的已披露限制）；需要保护时必须冻结。每次运行复制整个工作区，工作区很大时有相应的 I/O 开销（见基准中
+`acceptance_command_snapshot`）。Windows 上没有 `os.fwalk`/`dir_fd`，退回到按路径读取，未测试。
+
+### 2.8 并发
+
+`AuditLog.append` 使用线程锁和 POSIX `fcntl.flock`。多线程并发已测试；多进程并发写同一文件**未测试**；
+非 POSIX 平台没有文件锁。并发运行的多个验收命令各自使用独立快照（`test_concurrent_command_acceptance_is_isolated`）。
 
 ### 2.9 Schema 引用闭包
 
@@ -103,8 +138,3 @@ Schema 校验只加载工作区内的文件和本地元 Schema，并记录实际
 `baseline_id`（必需）及可选的 `baseline_revision`、`requirement_id`。绑定只说明签名者**声称**该证明针对哪个任务；
 它防止证明被挪用到其他任务，不证明签名者如实陈述。文件类证据（`file_sha256`、`json_schema`）可以不绑定，因为验证器每次都在
 当前工作区重新计算观测值。
-
-### 2.8 并发
-
-`AuditLog.append` 使用线程锁和 POSIX `fcntl.flock`。多线程并发已测试；多进程并发写同一文件**未测试**；
-非 POSIX 平台没有文件锁。
