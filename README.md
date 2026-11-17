@@ -31,7 +31,7 @@ Independent reusable three-valued feasibility operator.
 
 ## 安装
 
-要求 Python ≥ 3.11。唯一运行依赖：`jsonschema`。无云端服务、无 LLM、无 FBS 依赖。
+要求 Python ≥ 3.11。唯一运行依赖：`jsonschema`（其依赖 `referencing` 用于受控的 Schema 引用解析）。无云端服务、无 LLM、无 FBS 依赖。
 
 ```bash
 git clone https://github.com/zionlinne/phi-core.git

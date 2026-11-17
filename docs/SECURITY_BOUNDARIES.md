@@ -16,6 +16,12 @@
 | 契约中途被改 → 不放行 | 会话钉扎 + 可选自哈希 | `test_M_*` |
 | 验收基线被生产者修改/删需求 → 不 PASS | 独立锚（可签名） | `test_P_*`、`test_Q_*` |
 | 审计记录被编辑/删除/插入/重排 → 可检测（相对已知头哈希） | SHA-256 链 + 快照 hash | `test_tamper_detection`、`test_snapshot_tamper_*` |
+| 工作区 Schema 被改不能使 Φ TRUE / 验收 PASS | 契约/基线冻结 Schema 闭包 hash | `test_1_*`（`tests/test_round2_fixes.py`） |
+| Schema 校验不访问网络、不读工作区外文件，失败不抛出入口 | `safeschema` 受控 registry | `test_2_*` |
+| 被改或缺失的冻结验收脚本/配置不能 PASS | `pinned_files` 运行前后 hash | `test_3_*` |
+| 证据密钥不能批准需求变更 | 密钥用途域 `baseline-anchor` | `test_4_*` |
+| 每个检查点使用该时点的证据 | provider 按检查点调用 | `test_5_*` |
+| 证明不能跨任务/契约/检查点/基线复用 | 签名覆盖的 `binding` | `test_6_*` |
 
 ## 2. 库不能保证的（明确的边界）
 
@@ -37,7 +43,10 @@ phi-core 是 Python 库。它**无法阻止**不经过它的代码：同进程�
 
 ### 2.2 HMAC 签名的含义
 
-`hmac_attestation` 只证明"签名者持有 TrustStore 中该共享密钥"。它**不**证明人的身份或作者身份；
+`hmac_attestation` 只证明"签名者持有 TrustStore 中该共享密钥"。密钥按**用途**分域：`evidence` 用途的密钥只能签证据，
+`baseline-anchor` 用途的密钥只能签验收锚条目（缺省用途是 `evidence`）。用途域只在宿主把两类密钥分别发放给不同持有者时
+才有意义；同一个人同时持有两类密钥，库无法区分其行为。版本化需求不等于 Agent 可以自己改需求：新修订必须由持有
+`baseline-anchor` 密钥的验收方签署，签过名的锚链之后再出现未签名修订会被拒绝。它**不**证明人的身份或作者身份；
 任何拿到密钥的人（包括验证方本身，因为 HMAC 是对称的）都能产生有效签名；拥有宿主权限者可以读取密钥并伪造。
 密钥必须经带外方式发放给宿主，绝不能放进证据或交给被检查的 Agent。`examples/trust.demo.json` 是公开演示密钥。
 
@@ -67,8 +76,33 @@ phi-core 只验证**已注册谓词和验证器覆盖的内容**：文件存在/
 
 ### 2.7 验收命令的执行
 
-`command` 方法会在工作区中执行**基线中冻结的** argv（不经 shell，环境只保留 PATH）。基线由验收方定义并锚定，
-生产者无法改动；但命令本身运行在生产者产出的工作区上，宿主应在隔离环境中运行验收。
+`command` 方法会在工作区中执行**基线中冻结的** argv（不经 shell，环境只保留 PATH）。受支持的协议：
+
+1. argv 文本由基线 hash 冻结。
+2. 作为标准一部分的工作区文件（测试脚本、配置、fixture）由基线作者列入 `pinned_files[{path, sha256}]`；运行前逐个重新
+   hash，缺失 → FAIL `COMMAND_PINNED_FILE_MISSING`，不符 → FAIL `COMMAND_PINNED_FILE_MODIFIED`，此时命令**不运行**；
+   运行后再 hash 一次，被改 → FAIL `COMMAND_PINNED_FILE_MODIFIED_DURING_RUN`。结果 `detail.pinned_files_verified` 记录已核对的文件。
+3. 被检的交付物列入 `artifacts`（文件或目录）。
+4. argv 中直接指向工作区文件的参数（路径参数、`-m module`、`--opt=path`、目录）若既未冻结也未声明为交付物 →
+   INCONCLUSIVE `COMMAND_WORKSPACE_FILE_NOT_PINNED`。
+
+边界：第 4 条只识别 argv 中**直接出现**的工作区文件，是对"运行交付树里的脚本"这一常见情形的保护，**不是**对程序依赖的
+自动枚举。程序在内部按名字打开的文件、`import` 的模块、自动发现的配置（如 `conftest.py`、`pyproject.toml`、`.pth`）、
+环境变量指向的内容，库都看不到；这些必须由基线作者列入 `pinned_files`，否则不受保护。工作区外的程序（解释器、系统工具）
+同样不被 hash。命令运行在生产者产出的工作区上，宿主应在隔离环境中运行验收。
+
+### 2.9 Schema 引用闭包
+
+Schema 校验只加载工作区内的文件和本地元 Schema，并记录实际加载的每个文件的 SHA-256（闭包）。闭包中的每个文件都必须被契约
+或基线冻结。解析是惰性的：只有被校验文档实际走到的 `$ref` 才会加载，因此闭包随文档变化；未被走到的引用文件即使被改也不影响
+本次结论。
+
+### 2.10 证据绑定
+
+`binding` 由签名覆盖，改动会使签名失效。Φ 侧绑定 `task_id`（必需）及可选的 `contract_hash`、`checkpoints`；验收侧绑定
+`baseline_id`（必需）及可选的 `baseline_revision`、`requirement_id`。绑定只说明签名者**声称**该证明针对哪个任务；
+它防止证明被挪用到其他任务，不证明签名者如实陈述。文件类证据（`file_sha256`、`json_schema`）可以不绑定，因为验证器每次都在
+当前工作区重新计算观测值。
 
 ### 2.8 并发
 

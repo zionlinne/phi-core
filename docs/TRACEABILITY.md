@@ -125,6 +125,23 @@
 | 无 FBS / 特定 LLM / Harness / 云端依赖 | `test_no_fbs_runtime_dependency`、`test_no_fbs_llm_or_cloud_imports_in_package` |
 | License 不选、不授权 | `LICENSE` 未改变 |
 
+## 11. 独立测试（963d12b）缺陷修复映射（1.0.1）
+
+原始失败证据与原样 probe 输出保存在交付 ZIP 的 `phi-core-v1-round2/01-repro-963d12b/`。回归测试使用与 probe 相同的最小输入。
+
+| 缺陷 | 修复 | 代码 | 测试 |
+| --- | --- | --- | --- |
+| 1 SCHEMA-CRITERION-MUTABLE | 契约 `outputs[].schema_sha256/schema_refs`、基线 `schema_sha256/schema_refs` 冻结 Schema 闭包；未冻结 UNKNOWN/INCONCLUSIVE，字节变化 FALSE/FAIL；示例与 Harness 已冻结 | `safeschema.pin_issue`、`predicates.SchemaCompatible`、`acceptance._check_json_schema`、`contracts.compile_constraints` | `test_1_*`、`test_replay_reproduces_binding_and_schema_decisions`、Harness `schema_swap` |
+| 2 SCHEMA-REF-FETCH | 受控 `referencing.Registry`：片段、工作区相对文件、本地元 Schema；其余不可解析；结构化错误码；验收方法异常 → INCONCLUSIVE | `safeschema.check_document`、`evidence.JsonSchemaVerifier`、`acceptance.run_acceptance` | `test_2_*`（含 HTTP 计数服务器、socket 禁用、hypothesis 随机 `$ref`） |
+| 3 ACCEPT-COMMAND-UNPINNED-SCRIPT | `pinned_files` 运行前后 hash、`artifacts` 声明、argv 未冻结工作区文件 → INCONCLUSIVE | `acceptance._check_command`、`_unpinned_workspace_files` | `test_3_*` |
+| 4 ANCHOR-KEY-SOURCES-IGNORED | 密钥用途域（`evidence` / `baseline-anchor`，缺省 `evidence`）；签名后不得出现未签名修订 | `evidence.TrustStore`、`acceptance._verify_anchor` | `test_4_*` |
+| 5 RUNNER-PLAN-USES-DISPATCH-EVIDENCE | provider 按检查点调用；`GatedRunner` 传入 `collect_evidence` | `gate._resolve_evidence`、`GatedRunner.run` | `test_5_*` |
+| 6 EVIDENCE-NOT-BOUND-TO-TASK | 签名覆盖的 `binding`；Φ 核对任务/契约/检查点，验收核对基线/修订/需求；未绑定证明不使用 | `evaluator._binding_problem`、`acceptance._check_evidence`、`evidence.EvidenceItem` | `test_6_*`、`test_concurrent_tasks_never_share_attestations` |
+
+既有测试的适配（未改断言语义）：`tests/conftest.py` 的 `attest` 默认绑定测试任务；`tests/test_adversarial.py` 的夹具冻结
+Schema、为验收权威密钥加 `baseline-anchor` 用途；`tests/test_acceptance.py` 的两条验收证据绑定 `report-req`；
+`tests/test_engine.py` 的版本断言改为 `phi-core/1.0.1`；`benchmarks/bench_phi.py` 的证明绑定 `bench` 任务。
+
 ## 明确未覆盖 / 限制
 
 1. **OS 级恶意宿主或库外代码**：不防御（§2.1）。只能在受支持检查点重新观测。
@@ -135,4 +152,8 @@
 6. **多进程并发写审计**：有 `fcntl` 锁但未测试；非 POSIX 无锁。
 7. **平台**：仅在 Linux（本地 + GitHub Actions ubuntu）上运行过。
 8. **不回滚**：已放行 STEP 的副作用在后续检查点失败时保留（§2.1）；原子提升需宿主实现。
-9. **独立第三方测试**：尚未进行（由用户另行安排）。
+9. **独立第三方测试**：对 963d12b 的独立测试报告了 6 项缺陷，1.0.1 的修复见 §11；对 1.0.1 的独立复测尚未进行，
+   本文件不声称其通过。
+10. **验收命令依赖**：只识别 argv 中直接出现的工作区文件；程序内部读取、import、自动发现的配置必须由基线作者列入
+    `pinned_files`（安全边界 §2.7）。
+11. **Schema 闭包惰性**：只检查本次校验实际加载的引用文件（安全边界 §2.9）。

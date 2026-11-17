@@ -50,7 +50,8 @@ session.step(state_fn, evidence_fn, action)             # requires released pref
 session.commit(state_fn, evidence_fn, action)
 ```
 
-`state_fn` / `evidence_fn` 可以是可调用对象，门禁在评估时才调用，保证使用最新输入。
+`state_fn` / `evidence_fn` 可以是可调用对象，门禁在评估时才调用，保证使用最新输入。`evidence_fn` 若接受一个位置参数，
+门禁以当前检查点调用它（`evidence_fn("PLAN")`、`evidence_fn("DISPATCH")` ……）；零参数可调用对象仍按原样调用。
 
 ### Harness Adapter
 
@@ -64,6 +65,8 @@ class MyAdapter(HarnessAdapter):
 
 report = GatedRunner(gate, MyAdapter()).run()   # status: COMPLETED | BLOCKED | PAUSED
 ```
+
+`GatedRunner` 在 PLAN、DISPATCH、每个 STEP、COMMIT 分别调用 `collect_evidence(checkpoint)`。
 
 完整可运行示例：`examples/minimal_harness/harness.py`。
 
@@ -81,7 +84,7 @@ report = GatedRunner(gate, MyAdapter()).run()   # status: COMPLETED | BLOCKED | 
 | `phi audit replay LOG [--reverify --workspace --trust]` | 重放全部评估记录（先校验链） | 0 全部一致 / 1 |
 | `phi audit trace LOG EVIDENCE_ID` / `states LOG [--task-id]` / `head LOG` | 证据追踪 / 状态重建 / 头哈希 | 0 |
 | `phi accept --baseline --anchor --delivery --workspace --now [--trust] [--require-signed-anchor] [--audit] [--output]` | 独立验收 | 0 PASS / 30 FAIL / 40 INCONCLUSIVE |
-| `phi evidence observe --contract --workspace --now` / `sign FILE --trust --key-id` | 生成文件证据声明 / HMAC 签名 | 0 |
+| `phi evidence observe --contract --workspace --now [--checkpoint]` / `sign FILE --trust --key-id` | 生成绑定到契约任务（可选再绑定检查点）的文件证据声明 / HMAC 签名 | 0 |
 
 ## JSON 协议
 
@@ -111,10 +114,33 @@ report["phi_verdict_consulted"]  # always False
 | method | 行为 | 结果 |
 | --- | --- | --- |
 | `file` | 工作区文件存在，可选 sha256 | PASS / FAIL |
-| `command` | `argv`（不经 shell，`{python}` 替换为当前解释器），工作区为 cwd，超时 | 期望退出码 PASS / 其他 FAIL / 超时或无法运行 INCONCLUSIVE |
-| `json_schema` | 工作区 JSON 符合工作区 Schema | PASS / FAIL / Schema 缺失 INCONCLUSIVE |
-| `evidence` | 交付报告中的证据经 Evidence Verifier 验证，值与 `expected` 相等 | PASS / FAIL / 缺失或冲突 INCONCLUSIVE |
+| `command` | `argv`（不经 shell，`{python}` 替换为当前解释器），工作区为 cwd，超时；`pinned_files[{path, sha256}]` 运行前后重新 hash；`artifacts[relpath]` 声明 argv 可引用的被检交付物 | 期望退出码 PASS / 其他 FAIL / 冻结文件缺失或被改（运行前或运行中）FAIL / argv 指向未冻结且未声明的工作区文件 INCONCLUSIVE / 超时或无法运行 INCONCLUSIVE |
+| `json_schema` | 工作区 JSON 符合**冻结**的工作区 Schema（`schema_sha256`，引用文件 `schema_refs`），引用解析不访问网络或工作区外 | PASS / 不符合或冻结字节被改 FAIL / 未冻结、引用不可解析、Schema 缺失 INCONCLUSIVE |
+| `evidence` | 交付报告中的证据经 Evidence Verifier 验证，`binding.baseline_id` 为本基线（可选 `baseline_revision` / `requirement_id`），值与 `expected` 相等 | PASS / FAIL / 缺失、未绑定、绑定到其他基线或冲突 INCONCLUSIVE |
 | `manual`, `llm_judgment` | 不可自动判定 | 永远 INCONCLUSIVE |
 
 需求变更：`new_revision(old, requirements=..., summary=..., frozen_at=...)` 生成新修订（记录增删改），
 必须由验收方用 `make_anchor_entry` 追加到锚中后才有效；旧修订随即 `BASELINE_REVISION_SUPERSEDED`。
+
+锚条目只接受具有 `baseline-anchor` 用途的密钥签名（`TrustStore.add_key(..., purposes=["baseline-anchor"])`，
+trust JSON 中 `"purposes": ["baseline-anchor"]`）。用途缺省为 `["evidence"]`，因此证据密钥不能批准需求变更。
+
+## 1.0.1 协议变化（不兼容）
+
+1.0.1 修复独立测试（963d12b）报告的 6 个缺陷。以下变化会让按 1.0.0 写法的输入得到不同结果；
+都是有意的收紧，结果只会从 TRUE/PASS 变为 UNKNOWN/INCONCLUSIVE/FALSE/FAIL，不会反向。
+
+| 变化 | 1.0.0 行为 | 1.0.1 行为 | 迁移 |
+| --- | --- | --- | --- |
+| 输出 Schema 必须冻结 | 工作区 Schema 当时的内容即标准 | 无 `schema_sha256` → UNKNOWN `SCHEMA_CRITERION_NOT_PINNED`；字节变化 → FALSE `SCHEMA_CRITERION_MODIFIED` | 契约 `outputs[].schema_sha256`（引用文件加 `schema_refs`） |
+| 验收 Schema 必须冻结 | 同上 | 无 `schema_sha256` → INCONCLUSIVE；字节变化 → FAIL | 基线 `verification.schema_sha256` / `schema_refs` |
+| `$ref` 解析 | jsonschema 默认可经网络或 `file://` 取回；坏 https 在验收中抛异常 | 只解析片段、工作区相对文件与本地元 Schema；其他 → UNKNOWN/INCONCLUSIVE `SCHEMA_REF_UNRESOLVABLE`，不抛异常 | 把被引用 Schema 放进工作区并冻结 |
+| 验收命令引用工作区文件 | 只冻结 argv 文本 | argv 中的工作区文件必须在 `pinned_files` 或 `artifacts` 中，否则 INCONCLUSIVE；冻结文件缺失/被改 → FAIL | 在基线中列出 `pinned_files`（脚本、配置），被检交付物列入 `artifacts` |
+| 锚签名密钥 | 任何已登记密钥 | 仅 `baseline-anchor` 用途；缺省用途为 `evidence` | trust JSON 为验收权威密钥加 `"purposes": ["baseline-anchor"]` |
+| 签名证明需绑定 | 只校验签名 | 无 `binding` → UNKNOWN `EVIDENCE_NOT_BOUND_TO_TASK`；绑定其他任务/契约/检查点 → 不使用 | `make_evidence(..., binding={"task_id": ...})` 后再签名；验收证据用 `{"baseline_id": ...}` |
+| `observe_files` | 无绑定 | 自动 `binding={"task_id": contract.task_id}`，可加 `checkpoint=` | 无需改动 |
+| 证据 provider | 预检时只用 DISPATCH 证据 | 接受参数的 provider 按检查点调用 | 无需改动；需要区分检查点的适配器可直接使用参数 |
+| 版本号 | `phi-core/1.0.0` | `phi-core/1.0.1`、`phi-core-acceptance/1.0.1` | 回放 1.0.0 审计记录时 `replayed_evaluator_version` 会不同 |
+
+新增导出：`check_document`、`pin_issue`、`SchemaCheck`、`PURPOSE_EVIDENCE`、`PURPOSE_BASELINE_ANCHOR`。
+自定义验证器若其观测值完全由验证器在工作区重新计算，可声明类属性 `reobserves = True`，其证据无需绑定；否则必须绑定。

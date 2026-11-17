@@ -20,8 +20,9 @@
  │ compile_constraints   VerifierRegistry,          state/evidence predicates   │
  │                       verify_evidence                                         │
  │                                                                               │
- │ acceptance.py  run_acceptance  (imports only canonical/evidence/schemas;      │
- │                never evaluator/gate/predicates/audit)                         │
+ │ acceptance.py  run_acceptance  (imports only canonical/evidence/schemas/      │
+ │                safeschema; never evaluator/gate/predicates/audit)             │
+ │ safeschema.py  workspace-only $ref resolution, schema closure + pin check     │
  │ canonical.py   canonical JSON, SHA-256, RFC 3339, freeze                      │
  │ schemas.py     packaged JSON Schemas                                          │
  └───────────────────────────────────────────────────────────────────────────────┘
@@ -48,6 +49,8 @@
 ## 扩展点
 
 - `PredicateRegistry.register(name, Predicate)`：`StatePredicate` / `EvidencePredicate` / `FunctionPredicate`。
-- `VerifierRegistry.register(verifier)`：实现 `verifier_id` 与 `verify(item, ctx) -> VerificationResult`。
-- `HarnessAdapter`：`load_contract / observe_state / collect_evidence / plan_steps / commit`。
+- `VerifierRegistry.register(verifier)`：实现 `verifier_id` 与 `verify(item, ctx) -> VerificationResult`；
+  只有观测值完全由验证器在工作区重新计算时才可声明 `reobserves = True`（其证据可不绑定任务）。
+- `HarnessAdapter`：`load_contract / observe_state / collect_evidence(checkpoint) / plan_steps / commit`；
+  `collect_evidence` 在 PLAN、DISPATCH、每个 STEP、COMMIT 分别以对应检查点调用。
 - `PhiEngine(evaluator_version=...)`：配合 `audit.compare_versions` 比较不同版本裁决。

@@ -1,6 +1,7 @@
 # phi-core 规格说明 v1.0
 
-本文件描述 `phi-core 1.0.0`（`evaluator_version = "phi-core/1.0.0"`）**实际实现**的行为。
+本文件描述 `phi-core 1.0.1`（`evaluator_version = "phi-core/1.0.1"`，`acceptance_version = "phi-core-acceptance/1.0.1"`）
+**实际实现**的行为。相对 1.0.0 的不兼容变化见 [docs/API.md §1.0.1 协议变化](docs/API.md#101-协议变化不兼容)。
 JSON Schema 位于 `schemas/`，是结构的规范来源。
 
 ## 1. 算子定义
@@ -41,7 +42,7 @@ JSON Schema 位于 `schemas/`，是结构的规范来源。
 ## 2. 任务契约 T（`schemas/task_contract.v1.schema.json`）
 
 字段：`contract_version="1.0"`、`task_id`、`title`、`objective`、`parent_task_id`、`subtasks`、
-`dependencies`、`inputs[{path, sha256?}]`、`outputs[{path, owner?, sha256?, schema?}]`、
+`dependencies`、`inputs[{path, sha256?}]`、`outputs[{path, owner?, sha256?, schema?, schema_sha256?, schema_refs?}]`、
 `capabilities`、`resources[{name, amount}]`、`time_bounds{not_before?, deadline?}`、
 `constraints[]`、`constraint_scope{complete, declared_by?}`、`evidence_policy`、
 `acceptance{baseline_id, ...}`（只是对独立验收基线的引用，Φ 不读取）、`integrity{contract_hash}`、`metadata`。
@@ -84,8 +85,28 @@ JSON Schema 位于 `schemas/`，是结构的规范来源。
 | --- | --- | --- |
 | input_exists / output_exists | file_sha256 | 观测 exists=true / false |
 | file_hash | file_sha256 | 观测 sha256 = 期望 / 不同或文件缺失 |
-| schema_compatible | json_schema | 观测 valid=true / false 或文件缺失 |
+| schema_compatible | json_schema | 见 2.3 |
 | attested_value | hmac_attestation | 观测值与 `expected` 结构相等 / 不等 |
+
+### 2.3 Schema 标准的冻结与引用解析（`safeschema.py`）
+
+工作区里的 Schema 文件只有在其字节被契约冻结时才是标准：`outputs[p].schema_sha256` 冻结根 Schema，
+`outputs[p].schema_refs{相对路径: sha256}` 冻结被 `$ref` 引用的其他工作区文件。`schema_compatible` 依次判定：
+
+| 条件 | 状态 | reason |
+| --- | --- | --- |
+| 输出文件缺失 | VIOLATED | `FILE_MISSING` |
+| 未冻结 `schema_sha256` | UNRESOLVED | `SCHEMA_CRITERION_NOT_PINNED` |
+| 实际加载的根或引用文件字节与冻结值不同 | VIOLATED | `SCHEMA_CRITERION_MODIFIED` |
+| 加载了未在 `schema_refs` 中冻结的引用文件 | UNRESOLVED | `SCHEMA_REF_NOT_PINNED` |
+| 冻结一致，输出符合 / 不符合 | SATISFIED / VIOLATED | `SCHEMA_COMPATIBLE` / `SCHEMA_INCOMPATIBLE` |
+
+引用解析从不隐式访问外部：`#...` 片段引用正常解析；相对引用解析为工作区内文件（拒绝 `..` 与符号链接逃逸）；
+JSON Schema 元 Schema 由本地 `jsonschema-specifications` 提供；`http(s)`、`file://`、`urn:`、绝对路径、外来 `$id`
+基址一律不可解析。加载失败是结构化结果而不是异常：验证器给出 UNVERIFIABLE，reason 为
+`SCHEMA_PATH_OUTSIDE_WORKSPACE | SCHEMA_FILE_MISSING | SCHEMA_FILE_INVALID | SCHEMA_REF_UNRESOLVABLE | SCHEMA_VALIDATION_ERROR`，
+约束因此 UNRESOLVED，Φ 为 UNKNOWN。验收的 `json_schema` 方法使用同一加载器与同一冻结规则（`schema_sha256` / `schema_refs`
+写在冻结基线中），未冻结 → INCONCLUSIVE，字节不符 → FAIL。
 
 未注册类型 → UNRESOLVED `PREDICATE_NOT_EXECUTABLE`。`natural_language`、`llm`、`llm_judgment`、`free_text`
 是保留的不可执行类型，不能被注册。参数不合法 → `PREDICATE_PARAMS_INVALID`；谓词抛异常或返回非 `Outcome` →
@@ -100,7 +121,9 @@ S 由宿主维护并被引擎**信任**（见安全边界）。
 ## 4. 证据 E 与 Evidence Verifier
 
 每条证据（`schemas/evidence.v1.schema.json`）：`evidence_id, constraint_id, source, verifier_id,
-observed_value, verification_status, timestamp, artifact_hash, provenance`。
+observed_value, verification_status, timestamp, artifact_hash, provenance`，以及可选的 `binding`
+（`task_id`、`contract_hash`、`checkpoints`、`baseline_id`、`baseline_revision`、`requirement_id`）。
+`binding` 属于签名覆盖的字段；没有 `binding` 的证据签名与 1.0.0 相同。
 
 `verify_evidence` 独立判定每条证据为 `VERIFIED | REJECTED | UNVERIFIABLE`：
 
@@ -110,12 +133,18 @@ observed_value, verification_status, timestamp, artifact_hash, provenance`。
 - `verifier_id` 未注册 → UNVERIFIABLE `NO_REGISTERED_VERIFIER`；验证器异常/返回非法 → UNVERIFIABLE。
 - `file_sha256`：在工作区内**重新读取并计算**文件 hash；调用方声明的 hash 不符 → REJECTED `ARTIFACT_HASH_MISMATCH`。
 - `json_schema`：重新用工作区 Schema 校验工作区 JSON；声明与观测矛盾 → REJECTED。
-- `hmac_attestation`：要求 TrustStore 中的密钥、该密钥被授权的 `source`、对除 `verification_status` 与
+- `hmac_attestation`：要求 TrustStore 中具有 `evidence` 用途的密钥（否则 REJECTED `KEY_NOT_AUTHORIZED_FOR_EVIDENCE`）、该密钥被授权的 `source`、对除 `verification_status` 与
   `provenance.signature` 外全部字段的 HMAC-SHA256 签名；可选 `provenance.artifact_path` 重新 hash。
 
 引擎在每个证据约束上再检查：验证器在允许列表（`constraint.evidence.verifiers` 或谓词默认）、
 时效（`max_age_seconds`，默认 `evidence_policy.default_max_age_seconds`，再默认 3600）、
-主体匹配（如路径一致）、数量（`min_items`，默认 1）。无可用证据 → `EVIDENCE_MISSING`。
+主体匹配（如路径一致）、数量（`min_items`，默认 1）、**绑定**（见下）。无可用证据 → `EVIDENCE_MISSING`。
+
+**绑定**：证据只用于它绑定的任务。`binding.task_id` 与当前契约不同 → `EVIDENCE_BOUND_TO_OTHER_TASK`；
+给出 `contract_hash` 而与当前契约 hash 不同 → `EVIDENCE_BOUND_TO_OTHER_CONTRACT`；给出 `checkpoints` 而不含当前检查点 →
+`EVIDENCE_NOT_BOUND_TO_CHECKPOINT`。没有 `binding` 的证据 → `EVIDENCE_NOT_BOUND_TO_TASK`，唯一例外是验证器声明
+`reobserves = True`（内置 `file_sha256`、`json_schema`）：其观测值由验证器在本次评估的工作区重新计算，不从声明中携带。
+签名证明（`hmac_attestation`）与宿主注册的其他验证器必须绑定。
 
 **冲突**：同一约束的可用证据给出不同结论 → 默认 UNRESOLVED `EVIDENCE_CONFLICT`。唯一允许的裁决规则是契约中
 预先声明的 `conflict_resolution: {type: "source_precedence", order: [...]}`：只看排名最高的来源；
@@ -125,7 +154,9 @@ observed_value, verification_status, timestamp, artifact_hash, provenance`。
 
 检查点：`PLAN`、`DISPATCH`、`STEP`、`COMMIT`。`PhiGate.guard` / `GateSession` 在每次动作前用**最新**
 的 T/S/E 重新评估（含重新验证证据），只有 TRUE 才调用动作；FALSE 抛 `GateBlocked`，UNKNOWN 抛
-`GateNeedsEvidence`。`GateSession.preflight` 依次检查 PLAN 与 DISPATCH，并把当时的契约 hash 钉扎到后续
+`GateNeedsEvidence`。证据 provider 若接受一个位置参数，门禁以当前检查点调用它，因此 PLAN、DISPATCH、STEP、COMMIT
+各自取得该时点最新的证据（`GatedRunner` 直接传入 `adapter.collect_evidence`）；零参数 provider 仍被支持。
+`GateSession.preflight` 依次检查 PLAN 与 DISPATCH，并把当时的契约 hash 钉扎到后续
 检查点的 S 副本中。`Decision.token` 是对 (checkpoint, task, 三个 hash, verdict, 版本) 的 HMAC；
 `authorize` 校验令牌并**重新评估**，任何 hash 或结论变化都拒绝（`STALE_DECISION`）。
 
@@ -157,6 +188,10 @@ reason_codes, evaluator_version, timestamp, snapshot{contract, state, evidence},
 见 [docs/API.md](docs/API.md#acceptance) 与 [docs/SECURITY_BOUNDARIES.md](docs/SECURITY_BOUNDARIES.md)。
 要点：需求只来自冻结基线；基线 hash 必须等于独立锚（可 HMAC 签名）中当前修订；设计文档 hash 必须一致；
 每条需求按 `file / command / json_schema / evidence` 自动验证，`manual / llm_judgment` 只能 INCONCLUSIVE；
+锚条目只能由具有 `baseline-anchor` 用途的密钥签署（证据密钥 → FAIL `ANCHOR_KEY_NOT_AUTHORIZED_FOR_BASELINE`），已签名修订之后
+出现未签名修订 → FAIL `ANCHOR_UNSIGNED_REVISION_AFTER_SIGNED`；`command` 方法遵循冻结文件协议（`pinned_files` / `artifacts`，
+见安全边界 2.7）；`json_schema` 遵循 2.3 的冻结规则；`evidence` 方法只使用 `binding.baseline_id` 等于本基线的证据
+（可选 `baseline_revision`、`requirement_id` 进一步限定）；方法内部任何异常 → INCONCLUSIVE `VERIFICATION_ERROR`；
 追踪矩阵缺项 → FAIL；任一 FAIL → FAIL；否则任一 INCONCLUSIVE 或无需求 → INCONCLUSIVE；否则 PASS。
 DDR：分母 = 锚定基线修订的全部需求数；`rate_lower = FAIL/N`，`rate_upper = (FAIL+INCONCLUSIVE)/N`。
 
